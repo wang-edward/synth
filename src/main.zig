@@ -54,8 +54,15 @@ fn write_callback(
         var frame: c_int = 0;
         while (frame < frame_count) : (frame += 1) {
             const float_frame: f32 = @floatFromInt(frame);
-            const sample = std.math.sin((seconds_offset + float_frame *
+            var sample = std.math.sin((seconds_offset + float_frame *
                 seconds_per_frame) * radians_per_second);
+
+            if (sample >= 0.5) {
+                sample = 1;
+            } else if (sample <= 0.5) {
+                sample = 0;
+            }
+
             {
                 var channel: usize = 0;
                 while (channel < @as(usize, @intCast(layout.channel_count))) : (channel += 1) {

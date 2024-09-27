@@ -5,7 +5,7 @@ const std = @import("std");
 // runner.
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
-    const optimize = b.standardOptimizeOption(.{});
+    const optimize = std.builtin.OptimizeMode.Debug;
 
     const lib = b.addStaticLibrary(.{
         .name = "synth",
