@@ -52,7 +52,5 @@ Mkfile.old
 dkms.conf
 
 # zig
-build.zig
-build.zig.zon
 zig-out
 .zig-cache
