@@ -1,8 +1,8 @@
 const c = @cImport(@cInclude("soundio/soundio.h"));
 const std = @import("std");
-const osc = @import("osc.zig");
+const Osc = @import("osc.zig");
 
-var my_osc = osc.OscConfig.init(440.0, 0.9, osc.OscType.saw); // Initialize oscillator
+var my_osc = Osc.Config.init(440.0, 0.9, Osc.Type.saw); // Initialize oscillator
 var seconds_offset: f32 = 0;
 
 fn sio_err(err: c_int) !void {
@@ -66,10 +66,9 @@ fn write_callback(
 
         const float_frame_count: f32 = @floatFromInt(frame_count);
         seconds_offset += seconds_per_frame * float_frame_count;
+        frames_left -= frame_count;
 
         sio_err(c.soundio_outstream_end_write(maybe_outstream)) catch |err| std.debug.panic("end write failed: {s}", .{@errorName(err)});
-
-        frames_left -= frame_count;
     }
 }
 
