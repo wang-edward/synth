@@ -1,5 +1,6 @@
 const c = @cImport(@cInclude("soundio/soundio.h"));
 const std = @import("std");
+const osc = @import("osc.zig");
 
 fn sio_err(err: c_int) !void {
     switch (err) {
@@ -23,7 +24,7 @@ fn sio_err(err: c_int) !void {
     }
 }
 
-var seconds_offset: f32 = 0;
+var my_osc = osc.OscConfig.init(440.0, osc.OscType.saw); // Initialize oscillator
 
 fn write_callback(
     maybe_outstream: ?[*]c.SoundIoOutStream,
@@ -34,7 +35,6 @@ fn write_callback(
     const outstream: *c.SoundIoOutStream = &maybe_outstream.?[0];
     const layout = &outstream.layout;
     const float_sample_rate: f32 = @floatFromInt(outstream.sample_rate);
-    const seconds_per_frame = 1.0 / float_sample_rate;
     var frames_left = frame_count_max;
 
     while (frames_left > 0) {
@@ -49,31 +49,18 @@ fn write_callback(
 
         if (frame_count == 0) break;
 
-        const pitch = 440.0;
-        const radians_per_second = pitch * 2.0 * std.math.pi;
+        // Generate samples using the oscillator
+        const samples = my_osc.process(@intCast(frame_count), float_sample_rate);
+
         var frame: c_int = 0;
         while (frame < frame_count) : (frame += 1) {
-            const float_frame: f32 = @floatFromInt(frame);
-            var sample = std.math.sina((seconds_offset + float_frame *
-                seconds_per_frame) * radians_per_second);
-
-            if (sample >= 0.5) {
-                sample = 1;
-            } else if (sample <= 0.5) {
-                sample = 0;
-            }
-
-            {
-                var channel: usize = 0;
-                while (channel < @as(usize, @intCast(layout.channel_count))) : (channel += 1) {
-                    const channel_ptr = areas[channel].ptr;
-                    const sample_ptr: *f32 = @alignCast(@ptrCast(&channel_ptr[@intCast(areas[channel].step * frame)]));
-                    sample_ptr.* = sample;
-                }
+            var channel: usize = 0;
+            while (channel < @as(usize, @intCast(layout.channel_count))) : (channel += 1) {
+                const channel_ptr = areas[channel].ptr;
+                const sample_ptr: *f32 = @alignCast(@ptrCast(&channel_ptr[@intCast(areas[channel].step * frame)]));
+                sample_ptr.* = samples[@intCast(frame)]; // Write sample
             }
         }
-        const float_frame_count: f32 = @floatFromInt(frame_count);
-        seconds_offset += seconds_per_frame * float_frame_count;
 
         sio_err(c.soundio_outstream_end_write(maybe_outstream)) catch |err| std.debug.panic("end write failed: {s}", .{@errorName(err)});
 
@@ -104,7 +91,6 @@ pub fn main() !void {
     outstream.*.write_callback = write_callback;
 
     try sio_err(c.soundio_outstream_open(outstream));
-
     try sio_err(c.soundio_outstream_start(outstream));
 
     while (true) c.soundio_wait_events(soundio);
