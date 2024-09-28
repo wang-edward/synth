@@ -2,6 +2,9 @@ const c = @cImport(@cInclude("soundio/soundio.h"));
 const std = @import("std");
 const osc = @import("osc.zig");
 
+var my_osc = osc.OscConfig.init(440.0, 0.9, osc.OscType.sine); // Initialize oscillator
+var audio_buffer: []f32 = undefined;
+
 fn sio_err(err: c_int) !void {
     switch (err) {
         c.SoundIoErrorNone => {},
@@ -23,8 +26,6 @@ fn sio_err(err: c_int) !void {
         else => return error.Unknown,
     }
 }
-
-var my_osc = osc.OscConfig.init(440.0, osc.OscType.saw); // Initialize oscillator
 
 fn write_callback(
     maybe_outstream: ?[*]c.SoundIoOutStream,
@@ -50,7 +51,7 @@ fn write_callback(
         if (frame_count == 0) break;
 
         // Generate samples using the oscillator
-        const samples = my_osc.process(@intCast(frame_count), float_sample_rate);
+        my_osc.process(audio_buffer, float_sample_rate);
 
         var frame: c_int = 0;
         while (frame < frame_count) : (frame += 1) {
@@ -58,7 +59,7 @@ fn write_callback(
             while (channel < @as(usize, @intCast(layout.channel_count))) : (channel += 1) {
                 const channel_ptr = areas[channel].ptr;
                 const sample_ptr: *f32 = @alignCast(@ptrCast(&channel_ptr[@intCast(areas[channel].step * frame)]));
-                sample_ptr.* = samples[@intCast(frame)]; // Write sample
+                sample_ptr.* = audio_buffer[@intCast(frame)]; // Write sample
             }
         }
 
@@ -66,6 +67,7 @@ fn write_callback(
 
         frames_left -= frame_count;
     }
+    @memset(audio_buffer, 0.0);
 }
 
 pub fn main() !void {
@@ -86,6 +88,9 @@ pub fn main() !void {
 
     const outstream = c.soundio_outstream_create(device) orelse return error.OutOfMemory;
     defer c.soundio_outstream_destroy(outstream);
+
+    audio_buffer = std.heap.page_allocator.alloc(f32, 48000) catch unreachable;
+    defer std.heap.page_allocator.free(audio_buffer);
 
     outstream.*.format = c.SoundIoFormatFloat32NE;
     outstream.*.write_callback = write_callback;

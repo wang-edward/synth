@@ -54,3 +54,4 @@ dkms.conf
 # zig
 zig-out
 .zig-cache
+main
