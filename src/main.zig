@@ -58,6 +58,7 @@ fn write_callback(
             var channel: usize = 0;
             while (channel < @as(usize, @intCast(layout.channel_count))) : (channel += 1) {
                 const channel_ptr = areas[channel].ptr;
+                // areas[channel][step * frame]
                 const sample_ptr: *f32 = @alignCast(@ptrCast(&channel_ptr[@intCast(areas[channel].step * frame)]));
                 sample_ptr.* = audio_buffer[@intCast(frame)]; // Write sample
             }
