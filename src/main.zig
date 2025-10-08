@@ -31,7 +31,7 @@ fn write_callback(
     maybe_outstream: ?[*]c.SoundIoOutStream,
     frame_count_min: c_int,
     frame_count_max: c_int,
-) callconv(.C) void {
+) callconv(.c) void {
     _ = frame_count_min;
     const outstream: *c.SoundIoOutStream = &maybe_outstream.?[0];
     const layout = &outstream.layout;
@@ -59,7 +59,7 @@ fn write_callback(
             var channel: usize = 0;
             while (channel < @as(usize, @intCast(layout.channel_count))) : (channel += 1) {
                 const channel_ptr = areas[channel].ptr;
-                const sample_ptr: *f32 = @alignCast(@ptrCast(&channel_ptr[@intCast(areas[channel].step * frame)]));
+                const sample_ptr: *f32 = @ptrCast(@alignCast(&channel_ptr[@intCast(areas[channel].step * frame)]));
                 sample_ptr.* = sample;
             }
         }
