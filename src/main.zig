@@ -3,6 +3,8 @@ const std = @import("std");
 const Osc = @import("osc.zig");
 
 var my_osc = Osc.Config.init(440.0, 0.9, Osc.Type.saw); // Initialize oscillator
+var my_osc2 = Osc.Config.init(523.25, 0.9, Osc.Type.saw); // Initialize oscillator
+var my_osc3 = Osc.Config.init(659.255, 0.9, Osc.Type.saw); // Initialize oscillator
 var seconds_offset: f32 = 0;
 
 fn sio_err(err: c_int) !void {
@@ -55,7 +57,7 @@ fn write_callback(
         while (frame < frame_count) : (frame += 1) {
             const float_frame: f32 = @floatFromInt(frame);
             const t = (seconds_offset + float_frame * seconds_per_frame);
-            const sample = my_osc.process(t);
+            const sample = my_osc.process(t) + my_osc2.process(t) + my_osc3.process(t);
             var channel: usize = 0;
             while (channel < @as(usize, @intCast(layout.channel_count))) : (channel += 1) {
                 const channel_ptr = areas[channel].ptr;
@@ -97,5 +99,7 @@ pub fn main() !void {
     try sio_err(c.soundio_outstream_open(outstream));
     try sio_err(c.soundio_outstream_start(outstream));
 
-    while (true) c.soundio_wait_events(soundio);
+    while (true) {
+        c.soundio_wait_events(soundio);
+    }
 }
