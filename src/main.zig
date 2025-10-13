@@ -31,7 +31,7 @@ const Sine = struct {
         return .{ .freq = freq, .phase = 0 };
     }
     fn _process(p: *anyopaque, ctx: *Context, out: []Sample) void {
-        var self: *Sine = @alignCast(p);
+        var self: *Sine = @ptrCast(@alignCast(p));
         const inc = self.freq / ctx.sample_rate;
         var i: usize = 0;
         while (i < out.len) : (i += 1) {
@@ -54,7 +54,7 @@ const Gain = struct {
         return .{ .input = input, .gain = gain };
     }
     fn _process(p: *anyopaque, ctx: *Context, out: []Sample) void {
-        var self: *Gain = @alignCast(p);
+        var self: *Gain = @ptrCast(@alignCast(p));
         const tmp = ctx.tmp().alloc(Sample, out.len) catch unreachable;
         self.input.v.process(self.input.ptr, ctx, tmp);
         for (out, tmp) |*o, x| o.* = x * self.gain;
@@ -65,18 +65,18 @@ const Gain = struct {
 };
 
 const Mixer = struct {
-    inputs: []const *const Node,
+    inputs: []*const Node,
     vt: VTable = .{ .process = Mixer._process },
 
     pub fn init(a: std.mem.Allocator, inputs: []const *const Node) !*Mixer {
         const m = try a.create(Mixer);
         m.* = .{ .inputs = try a.alloc(*const Node, inputs.len) };
-        std.mem.copy(*const Node, m.inputs, inputs);
+        std.mem.copyForwards(*const Node, m.inputs, inputs);
         return m;
     }
     fn _process(p: *anyopaque, ctx: *Context, out: []Sample) void {
-        const self: *Mixer = @alignCast(p);
-        std.mem.set(Sample, out, 0);
+        const self: *Mixer = @ptrCast(@alignCast(p));
+        @memset(out, 0);
         for (self.inputs) |n| {
             const tmp = ctx.tmp().alloc(Sample, out.len) catch unreachable;
             n.v.process(n.ptr, ctx, tmp);
@@ -155,7 +155,9 @@ fn write_callback(
             var ch: usize = 0;
             while (ch < chans) : (ch += 1) {
                 // libsoundio uses non-interleaved channel areas with a byte step per frame
-                const ptr = areas[ch].ptr + areas[ch].step * f;
+                const step: usize = @intCast(areas[ch].step);
+                const fi: usize = @intCast(f);
+                const ptr = areas[ch].ptr + step * fi;
                 const sample_ptr: *f32 = @ptrCast(@alignCast(ptr));
                 sample_ptr.* = s;
             }
