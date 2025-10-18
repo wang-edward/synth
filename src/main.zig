@@ -88,7 +88,58 @@ const Mixer = struct {
     }
 };
 
-// --------- Globals used by the audio callback ----------
+const Distortion = struct {
+    pub const Mode = enum { hard, soft, tanh };
+
+    input: *const Node,
+    drive: f32, // >= 1.0 for more distortion
+    mix: f32, // 0 = dry, 1 = wet
+    mode: Mode = .soft,
+    vt: VTable = .{ .process = Distortion._process },
+
+    pub fn init(input: *const Node, drive: f32, mix: f32, mode: Mode) Distortion {
+        return .{ .input = input, .drive = drive, .mix = mix, .mode = mode };
+    }
+
+    fn shape(self: *const Distortion, x: Sample) Sample {
+        var y: f32 = x * self.drive;
+        switch (self.mode) {
+            .hard => {
+                if (y > 1.0) y = 1.0;
+                if (y < -1.0) y = -1.0;
+            },
+            .soft => {
+                // cubic soft clip (gentle, musical)
+                const y3 = y * y * y;
+                y = y - (y3 * (1.0 / 3.0));
+            },
+            .tanh => {
+                y = std.math.tanh(y);
+            },
+        }
+        // simple makeup so louder drive doesn’t explode output
+        if (self.drive > 1.0) y /= self.drive;
+        return y;
+    }
+
+    fn _process(p: *anyopaque, ctx: *Context, out: []Sample) void {
+        var self: *Distortion = @ptrCast(@alignCast(p));
+        const tmp = ctx.tmp().alloc(Sample, out.len) catch unreachable;
+        self.input.v.process(self.input.ptr, ctx, tmp);
+
+        // dry/wet blend
+        for (out, tmp) |*o, x| {
+            const wet = self.shape(x);
+            o.* = x + (wet - x) * self.mix;
+        }
+    }
+
+    pub fn asNode(self: *Distortion) Node {
+        return .{ .ptr = self, .v = &self.vt };
+    }
+};
+
+// Globals used by the audio callback
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 const A = gpa.allocator();
 
@@ -112,10 +163,10 @@ var nodeGA = gA.asNode();
 var nodeGB = gB.asNode();
 var nodeGC = gC.asNode();
 
-var mix: *Mixer = undefined;
+var mixer: *Mixer = undefined;
 var root: Node = undefined;
 
-// --------- libsoundio glue ----------
+// libsoundio glue
 fn must(ok: c_int) void {
     if (ok != c.SoundIoErrorNone) @panic("soundio error");
 }
@@ -168,17 +219,17 @@ fn write_callback(
     }
 }
 
-// --------- App setup ----------
 pub fn main() !void {
     defer _ = gpa.deinit();
 
     // Build graph storage on heap (for Mixer inputs array)
-    mix = try Mixer.init(A, &[_]*const Node{ &nodeGA, &nodeGB, &nodeGC });
+    mixer = try Mixer.init(A, &[_]*const Node{ &nodeGA, &nodeGB, &nodeGC });
     defer {
-        A.free(mix.inputs);
-        A.destroy(mix);
+        A.free(mixer.inputs);
+        A.destroy(mixer);
     }
-    root = mix.asNode();
+    var dist = Distortion.init(&mixer.asNode(), 4.0, 1.0, .hard);
+    root = dist.asNode();
 
     // soundio init
     const sio = c.soundio_create();
