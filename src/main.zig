@@ -58,6 +58,9 @@ var dist: audio.Distortion = undefined;
 var sio: ?*c.SoundIo = null;
 var out: ?*c.SoundIoOutStream = null;
 
+// shared sio pointer to allow main to kill sio
+var g_sio_ptr = std.atomic.Value(?*c.SoundIo).init(null);
+
 // Run flag for audio thread
 var g_run_audio = std.atomic.Value(bool).init(true);
 
@@ -130,13 +133,17 @@ fn underflow_callback(_: ?[*]c.SoundIoOutStream) callconv(.c) void {
 fn audioThreadMain() !void {
     // Build graph heap storage (Mixer inputs array)
     mixer = try audio.Mixer.init(A, &[_]*const audio.Node{ &nodeGA, &nodeGB, &nodeGC });
+    defer A.free(mixer.inputs);
+    defer A.destroy(mixer);
     dist = audio.Distortion.init(&mixer.asNode(), 4.0, 1.0, .hard);
     root = dist.asNode();
 
     // SoundIO setup
     sio = c.soundio_create();
     if (sio == null) return error.NoMem;
+    g_sio_ptr.store(sio, .release);
     defer {
+        g_sio_ptr.store(null, .release); // clear
         if (sio) |p| c.soundio_destroy(p);
         sio = null;
     }
@@ -168,10 +175,6 @@ fn audioThreadMain() !void {
     while (g_run_audio.load(.acquire)) {
         c.soundio_wait_events(sio);
     }
-
-    // Cleanup graph heap bits
-    A.free(mixer.inputs);
-    A.destroy(mixer);
 }
 
 // main (raylib on UI thread)
@@ -186,6 +189,10 @@ pub fn main() !void {
     var audio_thread = try std.Thread.spawn(.{}, audioThreadMain, .{});
     defer {
         g_run_audio.store(false, .release);
+        // wake audio thread out of soundio_wait_events
+        if (g_sio_ptr.load(.acquire)) |p| {
+            c.soundio_wakeup(p);
+        }
         audio_thread.join();
     }
 
