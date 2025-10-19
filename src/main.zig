@@ -262,5 +262,7 @@ pub fn main() !void {
     must(c.soundio_outstream_start(out));
 
     // Pump events
-    while (true) c.soundio_wait_events(sio);
+    while (true) {
+        c.soundio_wait_events(sio);
+    }
 }
