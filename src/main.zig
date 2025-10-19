@@ -1,11 +1,9 @@
 const std = @import("std");
 const rl = @import("raylib");
 const c = @cImport(@cInclude("soundio/soundio.h"));
-const audio = @import("audio.zig"); // your graph types (Context, Node, Sine, Gain, Mixer, Distortion, etc.)
+const audio = @import("audio.zig");
 
-// =============================== Double-buffered params ===============================
 const SharedParams = struct {
-    // Add anything you want to tweak at runtime here
     oscA_hz: f32 = 440.0,
     oscB_hz: f32 = 523.25,
     oscC_hz: f32 = 659.255,
@@ -29,7 +27,6 @@ inline fn paramsPublish(newp: SharedParams) void {
     g_params_idx.store(w, .release);
 }
 
-// =============================== Audio graph + allocs (audio thread) ==================
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 const A = gpa.allocator();
 
@@ -38,7 +35,7 @@ var scratch_mem: [64 * 1024]u8 = undefined;
 var scratch_fba = std.heap.FixedBufferAllocator.init(&scratch_mem);
 var context: audio.Context = undefined;
 
-// Graph objects (created on audio thread before streaming; then considered owned by it)
+// graph objects
 var oscA = audio.Sine.init(440);
 var oscB = audio.Sine.init(523.25);
 var oscC = audio.Sine.init(659.255);
@@ -64,12 +61,10 @@ var out: ?*c.SoundIoOutStream = null;
 // Run flag for audio thread
 var g_run_audio = std.atomic.Value(bool).init(true);
 
-// =============================== SoundIO helpers =====================================
 fn must(ok: c_int) void {
     if (ok != c.SoundIoErrorNone) @panic("soundio error");
 }
 
-// The real-time audio callback (runs on backend’s audio thread)
 fn write_callback(
     maybe_outstream: ?[*]c.SoundIoOutStream,
     _min: c_int,
@@ -145,28 +140,22 @@ fn audioThreadMain() !void {
         if (sio) |p| c.soundio_destroy(p);
         sio = null;
     }
-
     must(c.soundio_connect(sio));
     c.soundio_flush_events(sio);
-
     const idx = c.soundio_default_output_device_index(sio);
     if (idx < 0) return error.NoOutputDeviceFound;
-
     const dev = c.soundio_get_output_device(sio, idx) orelse return error.NoMem;
     defer c.soundio_device_unref(dev);
-
     out = c.soundio_outstream_create(dev) orelse return error.NoMem;
     defer {
         if (out) |p| c.soundio_outstream_destroy(p);
         out = null;
     }
-
     out.?.*.format = c.SoundIoFormatFloat32NE;
     out.?.*.write_callback = write_callback;
     out.?.*.underflow_callback = underflow_callback;
     // optional explicit rate
     // out.?.*.sample_rate = 48000;
-
     must(c.soundio_outstream_open(out.?));
 
     // Init graph context with chosen sample rate
@@ -185,7 +174,7 @@ fn audioThreadMain() !void {
     A.destroy(mixer);
 }
 
-// =============================== Main (Raylib on UI thread) ==========================
+// main (raylib on UI thread)
 fn clampF(v: f32, lo: f32, hi: f32) f32 {
     return if (v < lo) lo else if (v > hi) hi else v;
 }
@@ -193,14 +182,14 @@ fn clampF(v: f32, lo: f32, hi: f32) f32 {
 pub fn main() !void {
     defer _ = gpa.deinit();
 
-    // Start audio thread first
+    // start audio thread first
     var audio_thread = try std.Thread.spawn(.{}, audioThreadMain, .{});
     defer {
         g_run_audio.store(false, .release);
         audio_thread.join();
     }
 
-    // Raylib window on the main thread
+    // raylib window on the main thread
     const screenWidth = 800;
     const screenHeight = 450;
     rl.initWindow(screenWidth, screenHeight, "raylib + libsoundio (ping-pong params)");
@@ -211,20 +200,20 @@ pub fn main() !void {
     var y: i32 = 200;
 
     while (!rl.windowShouldClose()) {
-        // Move a circle (just to have some UI activity)
+        // move a circle (just to have some UI activity)
         if (rl.isKeyDown(.right)) x += 5;
         if (rl.isKeyDown(.left)) x -= 5;
         if (rl.isKeyDown(.up)) y -= 5;
         if (rl.isKeyDown(.down)) y += 5;
 
-        // Read current slot (optional; for displaying current values)
+        // read current slot (optional; for displaying current values)
         const cur = g_params_slots[g_params_idx.load(.acquire)];
 
         var a = cur.oscA_hz;
         var d = cur.drive;
         var m = cur.mix;
 
-        // Controls: A/Z = freqA +/- ; S/X = drive +/- ; D/C = mix +/-
+        // controls: A/Z = freqA +/- ; S/X = drive +/- ; D/C = mix +/-
         if (rl.isKeyPressed(.a)) a += 10.0;
         if (rl.isKeyPressed(.z)) a -= 10.0;
         if (rl.isKeyPressed(.s)) d += 0.25;
@@ -243,7 +232,6 @@ pub fn main() !void {
         next.oscA_hz = a;
         next.drive = d;
         next.mix = m;
-        // next.oscB_hz / next.oscC_hz if you add controls
 
         // publish to back, then flip
         paramsPublish(next);
