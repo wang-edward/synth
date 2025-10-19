@@ -1,17 +1,44 @@
 const std = @import("std");
+const rl = @import("raylib");
 const c = @cImport(@cInclude("soundio/soundio.h"));
-const audio = @import("audio.zig");
+const audio = @import("audio.zig"); // your graph types (Context, Node, Sine, Gain, Mixer, Distortion, etc.)
 
-// Globals used by the audio callback
+// =============================== Double-buffered params ===============================
+const SharedParams = struct {
+    // Add anything you want to tweak at runtime here
+    oscA_hz: f32 = 440.0,
+    oscB_hz: f32 = 523.25,
+    oscC_hz: f32 = 659.255,
+    drive: f32 = 4.0,
+    mix: f32 = 1.0,
+};
+
+var g_params_slots: [2]SharedParams = .{ .{}, .{} }; // front/back
+var g_params_idx = std.atomic.Value(u8).init(0); // index of *current* (front) slot
+
+inline fn paramsReadSnapshot() SharedParams {
+    // Audio thread: acquire to see a consistent published slot
+    const i = g_params_idx.load(.acquire);
+    return g_params_slots[i]; // copy to a local snapshot (small POD copy)
+}
+
+inline fn paramsPublish(newp: SharedParams) void {
+    const r = g_params_idx.load(.acquire);
+    const w = r ^ 1; // back slot
+    g_params_slots[w] = newp; // copy the whole struct
+    g_params_idx.store(w, .release);
+}
+
+// =============================== Audio graph + allocs (audio thread) ==================
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 const A = gpa.allocator();
 
-// Scratch for the audio thread: no sys allocs in callback
+// Scratch allocator for audio callback (no sys allocs in callback)
 var scratch_mem: [64 * 1024]u8 = undefined;
 var scratch_fba = std.heap.FixedBufferAllocator.init(&scratch_mem);
 var context: audio.Context = undefined;
 
-// Graph objects
+// Graph objects (created on audio thread before streaming; then considered owned by it)
 var oscA = audio.Sine.init(440);
 var oscB = audio.Sine.init(523.25);
 var oscC = audio.Sine.init(659.255);
@@ -28,12 +55,21 @@ var nodeGC = gC.asNode();
 
 var mixer: *audio.Mixer = undefined;
 var root: audio.Node = undefined;
+var dist: audio.Distortion = undefined;
 
-// libsoundio glue
+// libsoundio state (used only on audio thread)
+var sio: ?*c.SoundIo = null;
+var out: ?*c.SoundIoOutStream = null;
+
+// Run flag for audio thread
+var g_run_audio = std.atomic.Value(bool).init(true);
+
+// =============================== SoundIO helpers =====================================
 fn must(ok: c_int) void {
     if (ok != c.SoundIoErrorNone) @panic("soundio error");
 }
 
+// The real-time audio callback (runs on backend’s audio thread)
 fn write_callback(
     maybe_outstream: ?[*]c.SoundIoOutStream,
     _min: c_int,
@@ -44,9 +80,19 @@ fn write_callback(
     const layout = &outstream.layout;
     const chans: usize = @intCast(layout.channel_count);
 
+    // Snapshot params once per callback
+    const p = paramsReadSnapshot();
+
+    // Apply to graph up-front (no atomics in hot loop)
+    oscA.freq = p.oscA_hz;
+    oscB.freq = p.oscB_hz;
+    oscC.freq = p.oscC_hz;
+    dist.drive = p.drive;
+    dist.mix = p.mix;
+
     var frames_left = max;
 
-    // reset the fixed-buffer + arena at start of this callback
+    // Rebuild the temp arena for this callback
     scratch_fba = std.heap.FixedBufferAllocator.init(&scratch_mem);
     context.arena = std.heap.ArenaAllocator.init(scratch_fba.allocator());
 
@@ -57,18 +103,17 @@ fn write_callback(
         must(c.soundio_outstream_begin_write(maybe_outstream, @ptrCast(&areas), &frame_count));
         if (frame_count == 0) break;
 
-        // Render one block (mono) with the graph
+        // Render one block (mono) from the graph
         context.beginBlock();
         const mono = context.tmp().alloc(audio.Sample, @intCast(frame_count)) catch unreachable;
         root.v.process(root.ptr, &context, mono);
 
-        // Fan-out mono → all channels
+        // Fan-out mono -> all channels (non-interleaved areas)
         var f: c_int = 0;
         while (f < frame_count) : (f += 1) {
             const s = mono[@intCast(f)];
             var ch: usize = 0;
             while (ch < chans) : (ch += 1) {
-                // libsoundio uses non-interleaved channel areas with a byte step per frame
                 const step: usize = @intCast(areas[ch].step);
                 const fi: usize = @intCast(f);
                 const ptr = areas[ch].ptr + step * fi;
@@ -82,22 +127,24 @@ fn write_callback(
     }
 }
 
-pub fn main() !void {
-    defer _ = gpa.deinit();
+fn underflow_callback(_: ?[*]c.SoundIoOutStream) callconv(.c) void {
+    // avoid I/O here in production; okay to leave empty
+}
 
-    // Build graph storage on heap (for Mixer inputs array)
+// =============================== Audio thread entry ==================================
+fn audioThreadMain() !void {
+    // Build graph heap storage (Mixer inputs array)
     mixer = try audio.Mixer.init(A, &[_]*const audio.Node{ &nodeGA, &nodeGB, &nodeGC });
-    defer {
-        A.free(mixer.inputs);
-        A.destroy(mixer);
-    }
-    var dist = audio.Distortion.init(&mixer.asNode(), 4.0, 1.0, .hard);
+    dist = audio.Distortion.init(&mixer.asNode(), 4.0, 1.0, .hard);
     root = dist.asNode();
 
-    // soundio init
-    const sio = c.soundio_create();
+    // SoundIO setup
+    sio = c.soundio_create();
     if (sio == null) return error.NoMem;
-    defer c.soundio_destroy(sio);
+    defer {
+        if (sio) |p| c.soundio_destroy(p);
+        sio = null;
+    }
 
     must(c.soundio_connect(sio));
     c.soundio_flush_events(sio);
@@ -108,24 +155,112 @@ pub fn main() !void {
     const dev = c.soundio_get_output_device(sio, idx) orelse return error.NoMem;
     defer c.soundio_device_unref(dev);
 
-    const out = c.soundio_outstream_create(dev) orelse return error.NoMem;
-    defer c.soundio_outstream_destroy(out);
+    out = c.soundio_outstream_create(dev) orelse return error.NoMem;
+    defer {
+        if (out) |p| c.soundio_outstream_destroy(p);
+        out = null;
+    }
 
-    out.*.format = c.SoundIoFormatFloat32NE;
-    out.*.write_callback = write_callback;
-    // optional: pick sample rate; if 0, backend chooses a default
-    // out.*.sample_rate = 48000;
+    out.?.*.format = c.SoundIoFormatFloat32NE;
+    out.?.*.write_callback = write_callback;
+    out.?.*.underflow_callback = underflow_callback;
+    // optional explicit rate
+    // out.?.*.sample_rate = 48000;
 
-    must(c.soundio_outstream_open(out));
+    must(c.soundio_outstream_open(out.?));
 
-    // Initialize graph context with the chosen sample rate
-    const sr: f32 = @floatFromInt(out.*.sample_rate);
+    // Init graph context with chosen sample rate
+    const sr: f32 = @floatFromInt(out.?.*.sample_rate);
     context = audio.Context.init(scratch_fba.allocator(), sr);
 
-    must(c.soundio_outstream_start(out));
+    must(c.soundio_outstream_start(out.?));
 
-    // Pump events
-    while (true) {
+    // Pump events (stays on audio thread)
+    while (g_run_audio.load(.acquire)) {
         c.soundio_wait_events(sio);
+    }
+
+    // Cleanup graph heap bits
+    A.free(mixer.inputs);
+    A.destroy(mixer);
+}
+
+// =============================== Main (Raylib on UI thread) ==========================
+fn clampF(v: f32, lo: f32, hi: f32) f32 {
+    return if (v < lo) lo else if (v > hi) hi else v;
+}
+
+pub fn main() !void {
+    defer _ = gpa.deinit();
+
+    // Start audio thread first
+    var audio_thread = try std.Thread.spawn(.{}, audioThreadMain, .{});
+    defer {
+        g_run_audio.store(false, .release);
+        audio_thread.join();
+    }
+
+    // Raylib window on the main thread
+    const screenWidth = 800;
+    const screenHeight = 450;
+    rl.initWindow(screenWidth, screenHeight, "raylib + libsoundio (ping-pong params)");
+    defer rl.closeWindow();
+    rl.setTargetFPS(60);
+
+    var x: i32 = 200;
+    var y: i32 = 200;
+
+    while (!rl.windowShouldClose()) {
+        // Move a circle (just to have some UI activity)
+        if (rl.isKeyDown(.right)) x += 5;
+        if (rl.isKeyDown(.left)) x -= 5;
+        if (rl.isKeyDown(.up)) y -= 5;
+        if (rl.isKeyDown(.down)) y += 5;
+
+        // Read current slot (optional; for displaying current values)
+        const cur = g_params_slots[g_params_idx.load(.acquire)];
+
+        var a = cur.oscA_hz;
+        var d = cur.drive;
+        var m = cur.mix;
+
+        // Controls: A/Z = freqA +/- ; S/X = drive +/- ; D/C = mix +/-
+        if (rl.isKeyPressed(.a)) a += 10.0;
+        if (rl.isKeyPressed(.z)) a -= 10.0;
+        if (rl.isKeyPressed(.s)) d += 0.25;
+        if (rl.isKeyPressed(.x)) d -= 0.25;
+        if (rl.isKeyPressed(.d)) m += 0.05;
+        if (rl.isKeyPressed(.c)) m -= 0.05;
+
+        a = clampF(a, 50.0, 2000.0);
+        d = clampF(d, 1.0, 10.0);
+        m = clampF(m, 0.0, 1.0);
+
+        // read current (front) to start from existing values
+        var next = g_params_slots[g_params_idx.load(.acquire)];
+
+        // tweak fields from UI
+        next.oscA_hz = a;
+        next.drive = d;
+        next.mix = m;
+        // next.oscB_hz / next.oscC_hz if you add controls
+
+        // publish to back, then flip
+        paramsPublish(next);
+
+        // Draw
+        rl.beginDrawing();
+        defer rl.endDrawing();
+        rl.clearBackground(.black);
+        rl.drawCircle(x, y, 60, .white);
+
+        var buf: [160]u8 = undefined;
+        const line = std.fmt.bufPrintZ(
+            &buf,
+            "A/Z freqA: {d:.1}  S/X drive: {d:.2}  D/C mix: {d:.2}",
+            .{ a, d, m },
+        ) catch "params";
+        rl.drawText(line, 20, 20, 20, .light_gray);
+        rl.drawText("Audio on dedicated thread; params via double buffer + atomic index.", 20, 50, 18, .gray);
     }
 }
