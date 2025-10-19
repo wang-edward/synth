@@ -1,143 +1,6 @@
 const std = @import("std");
 const c = @cImport(@cInclude("soundio/soundio.h"));
-
-pub const Sample = f32;
-
-const ProcessFn = *const fn (self: *anyopaque, ctx: *Context, out: []Sample) void;
-const VTable = struct { process: ProcessFn };
-pub const Node = struct { ptr: *anyopaque, v: *const VTable };
-
-pub const Context = struct {
-    sample_rate: f32,
-    arena: std.heap.ArenaAllocator,
-
-    pub fn init(backing: std.mem.Allocator, sr: f32) Context {
-        return .{ .sample_rate = sr, .arena = std.heap.ArenaAllocator.init(backing) };
-    }
-    pub fn beginBlock(self: *Context) void {
-        _ = self.arena.reset(.retain_capacity);
-    }
-    pub fn tmp(self: *Context) std.mem.Allocator {
-        return self.arena.allocator();
-    }
-};
-
-const Sine = struct {
-    freq: f32,
-    phase: f32, // 0..1 cycles
-    vt: VTable = .{ .process = Sine._process },
-
-    pub fn init(freq: f32) Sine {
-        return .{ .freq = freq, .phase = 0 };
-    }
-    fn _process(p: *anyopaque, ctx: *Context, out: []Sample) void {
-        var self: *Sine = @ptrCast(@alignCast(p));
-        const inc = self.freq / ctx.sample_rate;
-        var i: usize = 0;
-        while (i < out.len) : (i += 1) {
-            out[i] = @floatCast(std.math.sin(self.phase * 2.0 * std.math.pi));
-            self.phase += inc;
-            if (self.phase >= 1.0) self.phase -= 1.0;
-        }
-    }
-    pub fn asNode(self: *Sine) Node {
-        return .{ .ptr = self, .v = &self.vt };
-    }
-};
-
-const Gain = struct {
-    input: *const Node,
-    gain: f32,
-    vt: VTable = .{ .process = Gain._process },
-
-    pub fn init(input: *const Node, gain: f32) Gain {
-        return .{ .input = input, .gain = gain };
-    }
-    fn _process(p: *anyopaque, ctx: *Context, out: []Sample) void {
-        var self: *Gain = @ptrCast(@alignCast(p));
-        const tmp = ctx.tmp().alloc(Sample, out.len) catch unreachable;
-        self.input.v.process(self.input.ptr, ctx, tmp);
-        for (out, tmp) |*o, x| o.* = x * self.gain;
-    }
-    pub fn asNode(self: *Gain) Node {
-        return .{ .ptr = self, .v = &self.vt };
-    }
-};
-
-const Mixer = struct {
-    inputs: []*const Node,
-    vt: VTable = .{ .process = Mixer._process },
-
-    pub fn init(a: std.mem.Allocator, inputs: []const *const Node) !*Mixer {
-        const m = try a.create(Mixer);
-        m.* = .{ .inputs = try a.alloc(*const Node, inputs.len) };
-        std.mem.copyForwards(*const Node, m.inputs, inputs);
-        return m;
-    }
-    fn _process(p: *anyopaque, ctx: *Context, out: []Sample) void {
-        const self: *Mixer = @ptrCast(@alignCast(p));
-        @memset(out, 0);
-        for (self.inputs) |n| {
-            const tmp = ctx.tmp().alloc(Sample, out.len) catch unreachable;
-            n.v.process(n.ptr, ctx, tmp);
-            for (out, tmp) |*o, x| o.* += x;
-        }
-    }
-    pub fn asNode(self: *Mixer) Node {
-        return .{ .ptr = self, .v = &self.vt };
-    }
-};
-
-const Distortion = struct {
-    pub const Mode = enum { hard, soft, tanh };
-
-    input: *const Node,
-    drive: f32, // >= 1.0 for more distortion
-    mix: f32, // 0 = dry, 1 = wet
-    mode: Mode = .soft,
-    vt: VTable = .{ .process = Distortion._process },
-
-    pub fn init(input: *const Node, drive: f32, mix: f32, mode: Mode) Distortion {
-        return .{ .input = input, .drive = drive, .mix = mix, .mode = mode };
-    }
-
-    fn shape(self: *const Distortion, x: Sample) Sample {
-        var y: f32 = x * self.drive;
-        switch (self.mode) {
-            .hard => {
-                if (y > 1.0) y = 1.0;
-                if (y < -1.0) y = -1.0;
-            },
-            .soft => {
-                // cubic soft clip (gentle, musical)
-                const y3 = y * y * y;
-                y = y - (y3 * (1.0 / 3.0));
-            },
-            .tanh => {
-                y = std.math.tanh(y);
-            },
-        }
-        // simple makeup so louder drive doesn’t explode output
-        if (self.drive > 1.0) y /= self.drive;
-        return y;
-    }
-
-    fn _process(p: *anyopaque, ctx: *Context, out: []Sample) void {
-        var self: *Distortion = @ptrCast(@alignCast(p));
-        const tmp = ctx.tmp().alloc(Sample, out.len) catch unreachable;
-        self.input.v.process(self.input.ptr, ctx, tmp);
-
-        // dry/wet blend
-        for (out, tmp) |*o, x| {
-            const wet = self.shape(x);
-            o.* = x + (wet - x) * self.mix;
-        }
-    }
-
-    pub fn asNode(self: *Distortion) Node {
-        return .{ .ptr = self, .v = &self.vt };
-    }
-};
+const audio = @import("audio.zig");
 
 // Globals used by the audio callback
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -146,25 +9,25 @@ const A = gpa.allocator();
 // Scratch for the audio thread: no sys allocs in callback
 var scratch_mem: [64 * 1024]u8 = undefined;
 var scratch_fba = std.heap.FixedBufferAllocator.init(&scratch_mem);
-var context: Context = undefined;
+var context: audio.Context = undefined;
 
 // Graph objects
-var oscA = Sine.init(440);
-var oscB = Sine.init(523.25);
-var oscC = Sine.init(659.255);
+var oscA = audio.Sine.init(440);
+var oscB = audio.Sine.init(523.25);
+var oscC = audio.Sine.init(659.255);
 var nodeOscA = oscA.asNode();
 var nodeOscB = oscB.asNode();
 var nodeOscC = oscC.asNode();
 
-var gA = Gain.init(&nodeOscA, 0.2);
-var gB = Gain.init(&nodeOscB, 0.2);
-var gC = Gain.init(&nodeOscC, 0.2);
+var gA = audio.Gain.init(&nodeOscA, 0.2);
+var gB = audio.Gain.init(&nodeOscB, 0.2);
+var gC = audio.Gain.init(&nodeOscC, 0.2);
 var nodeGA = gA.asNode();
 var nodeGB = gB.asNode();
 var nodeGC = gC.asNode();
 
-var mixer: *Mixer = undefined;
-var root: Node = undefined;
+var mixer: *audio.Mixer = undefined;
+var root: audio.Node = undefined;
 
 // libsoundio glue
 fn must(ok: c_int) void {
@@ -196,7 +59,7 @@ fn write_callback(
 
         // Render one block (mono) with the graph
         context.beginBlock();
-        const mono = context.tmp().alloc(Sample, @intCast(frame_count)) catch unreachable;
+        const mono = context.tmp().alloc(audio.Sample, @intCast(frame_count)) catch unreachable;
         root.v.process(root.ptr, &context, mono);
 
         // Fan-out mono → all channels
@@ -223,12 +86,12 @@ pub fn main() !void {
     defer _ = gpa.deinit();
 
     // Build graph storage on heap (for Mixer inputs array)
-    mixer = try Mixer.init(A, &[_]*const Node{ &nodeGA, &nodeGB, &nodeGC });
+    mixer = try audio.Mixer.init(A, &[_]*const audio.Node{ &nodeGA, &nodeGB, &nodeGC });
     defer {
         A.free(mixer.inputs);
         A.destroy(mixer);
     }
-    var dist = Distortion.init(&mixer.asNode(), 4.0, 1.0, .hard);
+    var dist = audio.Distortion.init(&mixer.asNode(), 4.0, 1.0, .hard);
     root = dist.asNode();
 
     // soundio init
@@ -257,7 +120,7 @@ pub fn main() !void {
 
     // Initialize graph context with the chosen sample rate
     const sr: f32 = @floatFromInt(out.*.sample_rate);
-    context = Context.init(scratch_fba.allocator(), sr);
+    context = audio.Context.init(scratch_fba.allocator(), sr);
 
     must(c.soundio_outstream_start(out));
 
