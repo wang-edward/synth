@@ -73,6 +73,9 @@ fn write_callback(
     _min: c_int,
     max: c_int,
 ) callconv(.c) void {
+    // exit early if program ended
+    if (!g_run_audio.load(.release)) return;
+
     _ = _min;
     const outstream: *c.SoundIoOutStream = &maybe_outstream.?[0];
     const layout = &outstream.layout;
