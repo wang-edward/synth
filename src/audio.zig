@@ -21,29 +21,6 @@ pub const Context = struct {
     }
 };
 
-pub const Sine = struct {
-    freq: f32,
-    phase: f32, // 0..1 cycles
-    vt: VTable = .{ .process = Sine._process },
-
-    pub fn init(freq: f32) Sine {
-        return .{ .freq = freq, .phase = 0 };
-    }
-    fn _process(p: *anyopaque, ctx: *Context, out: []Sample) void {
-        var self: *Sine = @ptrCast(@alignCast(p));
-        const inc = self.freq / ctx.sample_rate;
-        var i: usize = 0;
-        while (i < out.len) : (i += 1) {
-            out[i] = @floatCast(std.math.sin(self.phase * 2.0 * std.math.pi));
-            self.phase += inc;
-            if (self.phase >= 1.0) self.phase -= 1.0;
-        }
-    }
-    pub fn asNode(self: *Sine) Node {
-        return .{ .ptr = self, .v = &self.vt };
-    }
-};
-
 pub const Osc = struct {
     freq: f32,
     phase: f32,
