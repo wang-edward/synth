@@ -54,7 +54,7 @@ pub const Osc = struct {
         sine: struct {},
         pwm: struct { duty: f32 = 0.5 },
         saw: struct {},
-        sub: struct { offset: i32 = -12 },
+        sub: struct { duty: f32 = 0.5, offset: i32 = -12 },
     };
 
     pub fn init(freq: f32, kind: Kind) Osc {
@@ -64,11 +64,11 @@ pub const Osc = struct {
         var self: *Osc = @ptrCast(@alignCast(p));
         const inc = self.freq / ctx.sample_rate;
         for (0..out.len) |i| {
-            const sample = switch (self.kind) {
+            const sample: Sample = switch (self.kind) {
                 .sine => std.math.sin(self.phase * 2.0 * std.math.pi),
-                .pwm => if (self.phase < self.duty * 2.0 * std.math.pi) 1.0 else -1.0,
-                .saw => 2.0 * (self.phase / (2.0 * self.math.pi)) - 1.0,
-                .sub => if (self.phase < 2 * (self.duty * 2.0 * std.math.pi)) 1.0 else -1.0,
+                .pwm => |pwm| if (self.phase < pwm.duty * 2.0 * std.math.pi) 1.0 else -1.0,
+                .saw => 2.0 * (self.phase / (2.0 * std.math.pi)) - 1.0,
+                .sub => |sub| if (self.phase < 2 * (sub.duty * 2.0 * std.math.pi)) 1.0 else -1.0,
             };
             out[i] = @floatCast(sample);
             self.phase += inc;
