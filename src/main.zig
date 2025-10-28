@@ -36,9 +36,9 @@ var scratch_fba = std.heap.FixedBufferAllocator.init(&scratch_mem);
 var context: audio.Context = undefined;
 
 // graph objects
-var oscA = audio.Sine.init(440);
-var oscB = audio.Sine.init(523.25);
-var oscC = audio.Sine.init(659.255);
+var oscA = audio.Osc.init(440, .{ .sine = .{} });
+var oscB = audio.Osc.init(523.25, .{ .pwm = .{} });
+var oscC = audio.Osc.init(659.255, .{ .saw = .{} });
 var nodeOscA = oscA.asNode();
 var nodeOscB = oscB.asNode();
 var nodeOscC = oscC.asNode();
