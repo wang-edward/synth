@@ -44,6 +44,42 @@ pub const Sine = struct {
     }
 };
 
+pub const Osc = struct {
+    freq: f32,
+    phase: f32,
+    kind: Kind,
+    vt: VTable = .{ .process = Osc._process },
+
+    pub const Kind = union(enum) {
+        sine: struct {},
+        pwm: struct { duty: f32 = 0.5 },
+        saw: struct {},
+        sub: struct { offset: i32 = -12 },
+    };
+
+    pub fn init(freq: f32, kind: Kind) Osc {
+        return .{ .freq = freq, .phase = 0, .kind = kind };
+    }
+    fn _process(p: *anyopaque, ctx: *Context, out: []Sample) void {
+        var self: *Osc = @ptrCast(@alignCast(p));
+        const inc = self.freq / ctx.sample_rate;
+        for (0..out.len) |i| {
+            const sample = switch (self.kind) {
+                .sine => std.math.sin(self.phase * 2.0 * std.math.pi),
+                .pwm => if (self.phase < self.duty * 2.0 * std.math.pi) 1.0 else -1.0,
+                .saw => 2.0 * (self.phase / (2.0 * self.math.pi)) - 1.0,
+                .sub => if (self.phase < 2 * (self.duty * 2.0 * std.math.pi)) 1.0 else -1.0,
+            };
+            out[i] = @floatCast(sample);
+            self.phase += inc;
+            if (self.phase >= 1.0) self.phase -= 1.0;
+        }
+    }
+    pub fn asNode(self: *Osc) Node {
+        return .{ .ptr = self, .v = &self.vt };
+    }
+};
+
 pub const Gain = struct {
     input: *const Node,
     gain: f32,
