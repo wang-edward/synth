@@ -66,11 +66,9 @@ pub const Hpf = struct {
     // Original Implementation: D'Angelo, Valimaki
     pub const THERMAL_VOLTAGE = 0.312;
     input: *const Node,
-    V: [4]f32,
-    dV: [4]f32,
-    tV: [4]f32,
-    x: f32,
-    g: f32,
+    V: [4]f32 = undefined,
+    dV: [4]f32 = undefined,
+    tV: [4]f32 = undefined,
     drive: f32,
     resonance: f32,
     cutoff: f32,
@@ -113,6 +111,9 @@ pub const Hpf = struct {
 
             out[i] = self.V[3];
         }
+    }
+    pub fn asNode(self: *Hpf) Node {
+        return .{ .ptr = self, .v = &self.vt };
     }
 };
 
