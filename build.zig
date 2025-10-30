@@ -21,7 +21,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     const soundio_mod = soundio_dep.module("SoundIo");
-    const soundio_artifact = soundio_dep.artifact("soundio"); // raylib C library
+    const soundio_artifact = soundio_dep.artifact("soundio");
 
     const exe = b.addExecutable(.{
         .name = "synth",
