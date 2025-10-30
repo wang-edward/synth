@@ -9,7 +9,7 @@
     // This field is optional.
     // This is currently advisory only; Zig does not yet do anything
     // with this value.
-    //.minimum_zig_version = "0.11.0",
+    .minimum_zig_version = "0.15.1",
 
     // This field is optional.
     // Each dependency must either provide a `url` and `hash`, or a `path`.
@@ -20,6 +20,10 @@
         .raylib_zig = .{
             .url = "git+https://github.com/raylib-zig/raylib-zig?ref=devel#163b1ef2e993fe7cc7c76bb3213d98612f4b7676",
             .hash = "raylib_zig-5.6.0-dev-KE8REGNJBQDSjjyCmf4ATVQtk_OaBpY0B7kBxwSOPEGZ",
+        },
+        .libsoundio = .{
+            .url = "git+https://github.com/wang-edward/libsoundio-zig#bf7a0faeef53d7b42e11c13cf092f722b5ea82a5",
+            .hash = "libsoundio-2.0.1-7-G4FUjiplCgArltenDT_aKLsxp5B9Oeqb0nV72_1OV7F3",
         },
     },
     .paths = .{

@@ -16,6 +16,13 @@ pub fn build(b: *std.Build) void {
     const raygui = raylib_dep.module("raygui"); // raygui module
     const raylib_artifact = raylib_dep.artifact("raylib"); // raylib C library
 
+    const soundio_dep = b.dependency("libsoundio", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    const soundio_mod = soundio_dep.module("SoundIo");
+    const soundio_artifact = soundio_dep.artifact("soundio");
+
     const exe = b.addExecutable(.{
         .name = "synth",
         .root_module = b.createModule(.{
@@ -25,11 +32,12 @@ pub fn build(b: *std.Build) void {
             .imports = &.{
                 .{ .name = "raylib", .module = raylib },
                 .{ .name = "raygui", .module = raygui },
+                .{ .name = "soundio", .module = soundio_mod },
             },
         }),
     });
     exe.linkLibrary(raylib_artifact);
-    exe.linkSystemLibrary("soundio");
+    exe.linkLibrary(soundio_artifact);
     exe.linkLibC();
     b.installArtifact(exe);
 
