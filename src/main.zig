@@ -9,6 +9,7 @@ const SharedParams = struct {
     oscC_hz: f32 = 659.255,
     drive: f32 = 4.0,
     mix: f32 = 1.0,
+    cutoff: f32 = 2000.0,
 };
 
 var g_params_slots: [2]SharedParams = .{ .{}, .{} }; // front/back
@@ -91,6 +92,7 @@ fn write_callback(
     oscC.freq = p.oscC_hz;
     dist.drive = p.drive;
     dist.mix = p.mix;
+    hpf.cutoff = p.cutoff;
 
     var frames_left = max;
 
@@ -144,7 +146,7 @@ fn audioThreadMain() !void {
         &mixer.asNode(),
         1.0,
         1.0,
-        2_000,
+        1_000,
     );
     root = hpf.asNode();
 
@@ -229,6 +231,7 @@ pub fn main() !void {
         var a = cur.oscA_hz;
         var d = cur.drive;
         var m = cur.mix;
+        var cut = cur.cutoff;
 
         // controls: A/Z = freqA +/- ; S/X = drive +/- ; D/C = mix +/-
         if (rl.isKeyPressed(.a)) a += 10.0;
@@ -237,10 +240,13 @@ pub fn main() !void {
         if (rl.isKeyPressed(.x)) d -= 0.25;
         if (rl.isKeyPressed(.d)) m += 0.05;
         if (rl.isKeyPressed(.c)) m -= 0.05;
+        if (rl.isKeyPressed(.q)) cut -= 200.0;
+        if (rl.isKeyPressed(.w)) cut += 200.0;
 
         a = clampF(a, 50.0, 2000.0);
         d = clampF(d, 1.0, 10.0);
         m = clampF(m, 0.0, 1.0);
+        cut = clampF(cut, 100.0, 10000.0);
 
         // read current (front) to start from existing values
         var next = g_params_slots[g_params_idx.load(.acquire)];
@@ -249,6 +255,7 @@ pub fn main() !void {
         next.oscA_hz = a;
         next.drive = d;
         next.mix = m;
+        next.cutoff = cut;
 
         // publish to back, then flip
         paramsPublish(next);
@@ -262,8 +269,8 @@ pub fn main() !void {
         var buf: [160]u8 = undefined;
         const line = std.fmt.bufPrintZ(
             &buf,
-            "A/Z freqA: {d:.1}  S/X drive: {d:.2}  D/C mix: {d:.2}",
-            .{ a, d, m },
+            "A/Z freqA: {d:.1}  S/X drive: {d:.2}  D/C mix: {d:.2}  Q/W cutoff: {d:.0}",
+            .{ a, d, m, cut },
         ) catch "params";
         rl.drawText(line, 20, 20, 20, .light_gray);
         rl.drawText("Audio on dedicated thread; params via double buffer + atomic index.", 20, 50, 18, .gray);
