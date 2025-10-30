@@ -61,6 +61,62 @@ pub const Osc = struct {
     }
 };
 
+pub const Hpf = struct {
+    // References: "An Improved Virtual Analog Model of the Moog Ladder Filter"
+    // Original Implementation: D'Angelo, Valimaki
+    pub const THERMAL_VOLTAGE = 0.312;
+    input: *const Node,
+    V: [4]f32 = undefined,
+    dV: [4]f32 = undefined,
+    tV: [4]f32 = undefined,
+    drive: f32,
+    resonance: f32,
+    cutoff: f32,
+    vt: VTable = .{ .process = Hpf._process },
+
+    pub fn init(input: *const Node, drive: f32, resonance: f32, cutoff: f32) Hpf {
+        return .{ .input = input, .drive = drive, .resonance = resonance, .cutoff = cutoff };
+    }
+    fn _process(p: *anyopaque, ctx: *Context, out: []Sample) void {
+        var self: *Hpf = @ptrCast(@alignCast(p));
+        const in = ctx.tmp().alloc(Sample, out.len) catch unreachable;
+        self.input.v.process(self.input.ptr, ctx, in);
+
+        var dV0: f32 = undefined;
+        var dV1: f32 = undefined;
+        var dV2: f32 = undefined;
+        var dV3: f32 = undefined;
+        const x = (std.math.pi * self.cutoff) / ctx.sample_rate;
+        const g = 4.0 * std.math.pi * THERMAL_VOLTAGE * self.cutoff * (1.0 - x) / (1.0 + x);
+        for (0..out.len) |i| {
+            dV0 = -g * (std.math.tanh((self.drive * in[i] + self.resonance * self.V[3] / (2.0 * THERMAL_VOLTAGE)) + self.tV[0]));
+            self.V[0] += (dV0 + self.dV[0]) / (2.0 * ctx.sample_rate);
+            self.dV[0] = dV0;
+            self.tV[0] = std.math.tanh(self.V[0] / (2.0 * THERMAL_VOLTAGE));
+
+            dV1 = g * (self.tV[0] - self.tV[1]);
+            self.V[1] += (dV1 + self.dV[1]) / (2.0 * ctx.sample_rate);
+            self.dV[1] = dV1;
+            self.tV[1] = std.math.tanh(self.V[1] / (2.0 * THERMAL_VOLTAGE));
+
+            dV2 = g * (self.tV[1] - self.tV[2]);
+            self.V[2] += (dV2 + self.dV[2]) / (2.0 * ctx.sample_rate);
+            self.dV[2] = dV2;
+            self.tV[2] = std.math.tanh(self.V[2] / (2.0 * THERMAL_VOLTAGE));
+
+            dV3 = g * (self.tV[2] - self.tV[3]);
+            self.V[3] += (dV3 + self.dV[3]) / (2.0 * ctx.sample_rate);
+            self.dV[3] = dV3;
+            self.tV[3] = std.math.tanh(self.V[3] / (2.0 * THERMAL_VOLTAGE));
+
+            out[i] = self.V[3];
+        }
+    }
+    pub fn asNode(self: *Hpf) Node {
+        return .{ .ptr = self, .v = &self.vt };
+    }
+};
+
 pub const Gain = struct {
     input: *const Node,
     gain: f32,
