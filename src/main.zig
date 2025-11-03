@@ -2,6 +2,7 @@ const std = @import("std");
 const rl = @import("raylib");
 const c = @cImport(@cInclude("soundio/soundio.h"));
 const audio = @import("audio.zig");
+const synth = @import("synth.zig");
 
 const SharedParams = struct {
     oscA_hz: f32 = 440.0,
