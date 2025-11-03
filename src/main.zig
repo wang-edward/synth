@@ -54,7 +54,7 @@ var nodeGC = gC.asNode();
 var mixer: *audio.Mixer = undefined;
 var root: audio.Node = undefined;
 var dist: audio.Distortion = undefined;
-var hpf: audio.Hpf = undefined;
+var hpf: audio.Lpf = undefined;
 
 // libsoundio state (used only on audio thread)
 var sio: ?*c.SoundIo = null;
@@ -142,7 +142,7 @@ fn audioThreadMain() !void {
     defer A.free(mixer.inputs);
     defer A.destroy(mixer);
     // dist = audio.Distortion.init(&mixer.asNode(), 4.0, 1.0, .hard);
-    hpf = audio.Hpf.init(
+    hpf = audio.Lpf.init(
         &mixer.asNode(),
         1.0,
         1.0,

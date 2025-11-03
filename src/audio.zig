@@ -61,7 +61,7 @@ pub const Osc = struct {
     }
 };
 
-pub const Hpf = struct {
+pub const Lpf = struct {
     // References: "An Improved Virtual Analog Model of the Moog Ladder Filter"
     // Original Implementation: D'Angelo, Valimaki
     pub const THERMAL_VOLTAGE = 0.312;
@@ -72,13 +72,13 @@ pub const Hpf = struct {
     drive: f32,
     resonance: f32,
     cutoff: f32,
-    vt: VTable = .{ .process = Hpf._process },
+    vt: VTable = .{ .process = Lpf._process },
 
-    pub fn init(input: *const Node, drive: f32, resonance: f32, cutoff: f32) Hpf {
+    pub fn init(input: *const Node, drive: f32, resonance: f32, cutoff: f32) Lpf {
         return .{ .input = input, .drive = drive, .resonance = resonance, .cutoff = cutoff };
     }
     fn _process(p: *anyopaque, ctx: *Context, out: []Sample) void {
-        var self: *Hpf = @ptrCast(@alignCast(p));
+        var self: *Lpf = @ptrCast(@alignCast(p));
         const in = ctx.tmp().alloc(Sample, out.len) catch unreachable;
         self.input.v.process(self.input.ptr, ctx, in);
 
@@ -112,7 +112,7 @@ pub const Hpf = struct {
             out[i] = self.V[3];
         }
     }
-    pub fn asNode(self: *Hpf) Node {
+    pub fn asNode(self: *Lpf) Node {
         return .{ .ptr = self, .v = &self.vt };
     }
 };
