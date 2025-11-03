@@ -137,24 +137,27 @@ pub const Gain = struct {
 };
 
 pub const Mixer = struct {
-    inputs: []*const Node,
+    inputs: []Node,
     vt: VTable = .{ .process = Mixer._process },
 
-    pub fn init(a: std.mem.Allocator, inputs: []const *const Node) !*Mixer {
+    pub fn init(a: std.mem.Allocator, inputs: []const Node) !*Mixer {
         const m = try a.create(Mixer);
-        m.* = .{ .inputs = try a.alloc(*const Node, inputs.len) };
-        std.mem.copyForwards(*const Node, m.inputs, inputs);
+        m.* = .{ .inputs = try a.alloc(Node, inputs.len) };
+        std.mem.copyForwards(Node, m.inputs, inputs);
         return m;
     }
+
     fn _process(p: *anyopaque, ctx: *Context, out: []Sample) void {
         const self: *Mixer = @ptrCast(@alignCast(p));
         @memset(out, 0);
+
         for (self.inputs) |n| {
             const tmp = ctx.tmp().alloc(Sample, out.len) catch unreachable;
             n.v.process(n.ptr, ctx, tmp);
             for (out, tmp) |*o, x| o.* += x;
         }
     }
+
     pub fn asNode(self: *Mixer) Node {
         return .{ .ptr = self, .v = &self.vt };
     }
