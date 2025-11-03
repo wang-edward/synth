@@ -3,7 +3,7 @@ const audio = @import("audio.zig");
 
 const NoteState = union(enum) {
     Off,
-    On: struct { note: u8 },
+    On: u8,
 };
 
 const Voice = struct {
@@ -51,7 +51,7 @@ const Synth = struct {
         v.pwm.freq = freq;
         v.saw.freq = freq;
         v.sub.freq = freq;
-        v.noteState = NoteState.On(.{ .note = note });
+        v.noteState = NoteState.On(note);
     }
 
     pub fn noteOff(self: *Synth, note: u8) void {
@@ -59,7 +59,7 @@ const Synth = struct {
             switch (v.noteState) {
                 .Off => {},
                 .On => |on| {
-                    if (on.note == note)
+                    if (on == note)
                         v.noteState = .Off;
                 },
             }
