@@ -194,9 +194,9 @@ pub fn main() !void {
         audio_thread.join();
     }
 
-    const w = 640;
-    const h = 360;
-    rl.initWindow(w, h, "Zig Synth");
+    const w = 720;
+    const h = 480;
+    rl.initWindow(w, h, "leSynth");
     defer rl.closeWindow();
     rl.setTargetFPS(60);
     const note_keys = [_]rl.KeyboardKey{
@@ -243,8 +243,10 @@ pub fn main() !void {
         rl.beginDrawing();
         defer rl.endDrawing();
         rl.clearBackground(.black);
-        rl.drawText("Press A-L keys to play notes (W, E, etc. for sharp/flat). Z/X to change octave", 20, 20, 20, .white);
-        rl.drawText("Press ESC to quit", 20, 50, 20, .gray);
+        rl.drawText("Press A-L keys to play notes (W, E, etc. for sharp/flat)", 20, 20, 20, .white);
+        rl.drawText("Z/X to change octave", 20, 40, 20, .white);
+
+        rl.drawText("Press ESC to quit", 20, 440, 20, .gray);
         rl.drawText("Up / Down to change filter cutoff", 20, 70, 20, .white);
         var buf: [160]u8 = undefined;
         const line = std.fmt.bufPrintZ(
@@ -252,6 +254,6 @@ pub fn main() !void {
             "cutoff: {d:.0}, offset: {d:.0}",
             .{ params.cutoff, @divTrunc(offset, 12) },
         ) catch "params";
-        rl.drawText(line, 90, 90, 20, .white);
+        rl.drawText(line, 360, 240, 20, .white);
     }
 }
