@@ -12,6 +12,7 @@ const Voice = struct {
     sub: audio.Osc,
     // noise: audio.Noise, // TODO
     mixer: *audio.Mixer, // TODO rename mixer
+    gate: audio.Gate,
 
     noteState: NoteState = .Off,
 
@@ -23,6 +24,7 @@ const Voice = struct {
         v.mixer = try audio.Mixer.init(alloc, &[_]audio.Node{
             v.pwm.asNode(), v.saw.asNode(), v.sub.asNode(),
         });
+        v.gate = audio.Gate.init(v.mixer.asNode());
         v.noteState = .Off;
         return v;
     }
@@ -32,7 +34,24 @@ const Voice = struct {
         alloc.destroy(self);
     }
     pub fn asNode(self: *Voice) audio.Node {
-        return self.mixer.asNode();
+        return self.gate.asNode();
+    }
+    pub fn setNoteOn(self: *Voice, note: u8) void {
+        self.noteState = .{ .On = note };
+        const freq = noteToFreq(note);
+        self.pwm.freq = freq;
+        self.saw.freq = freq;
+        self.sub.freq = freq;
+        self.gate.open = true;
+    }
+    pub fn setNoteOff(self: *Voice, note: u8) void {
+        switch (self.noteState) {
+            .On => |on| if (on == note) {
+                self.noteState = .Off;
+                self.gate.open = false;
+            },
+            else => {},
+        }
     }
 };
 
@@ -69,23 +88,12 @@ pub const Synth = struct {
         const idx = self.next_idx;
         self.next_idx = (self.next_idx + 1) % self.voices.len;
 
-        var v = &self.voices[idx];
-        const freq = noteToFreq(note);
-        v.pwm.freq = freq;
-        v.saw.freq = freq;
-        v.sub.freq = freq;
-        v.noteState = NoteState.On(note);
+        self.voices[idx].setNoteOn(note);
     }
     pub fn noteOff(self: *Synth, note: u8) void {
-        for (self.voices) |*v| {
-            switch (v.noteState) {
-                .Off => {},
-                .On => |on| {
-                    if (on == note)
-                        v.noteState = .Off;
-                },
-            }
-        }
+        // TODO weird logic here with repeat notes in Voices
+        // not sure what to do in this case yet
+        for (self.voices) |v| v.setNoteOff(note);
         // TODO raise warning if note not found?
     }
     pub fn asNode(self: *Synth) audio.Node {
@@ -94,5 +102,6 @@ pub const Synth = struct {
 };
 
 fn noteToFreq(note: u8) f32 {
-    return Synth.SYNTH_TUNING * std.math.exp2((note - 69) / 12);
+    const semitone_offset = @as(f32, @floatFromInt(@as(i16, @intCast(note)) - 69));
+    return Synth.SYNTH_TUNING * std.math.exp2(semitone_offset / 12.0);
 }
