@@ -207,6 +207,7 @@ pub fn main() !void {
     var params = SharedParams{};
     paramsPublish(params);
 
+    var offset: i8 = 0;
     var key_state = std.AutoHashMap(rl.KeyboardKey, bool).init(A);
     defer key_state.deinit();
     for (note_keys) |k| try key_state.put(k, false);
@@ -218,11 +219,11 @@ pub fn main() !void {
 
             if (down and !prev) {
                 // key pressed
-                if (keyToMidi(key)) |note| leSynth.noteOn(note);
+                if (keyToMidi(key)) |note| leSynth.noteOn(@intCast(@as(i16, note) + @as(i16, offset)));
                 std.debug.print("key pressed {}\n", .{key});
             } else if (!down and prev) {
                 // key released
-                if (keyToMidi(key)) |note| leSynth.noteOff(note);
+                if (keyToMidi(key)) |note| leSynth.noteOff(@intCast(@as(i16, note) + @as(i16, offset)));
                 std.debug.print("key released {}\n", .{key});
             }
 
@@ -235,17 +236,21 @@ pub fn main() !void {
 
         paramsPublish(params);
 
+        if (rl.isKeyPressed(.x)) offset += 12;
+        if (rl.isKeyPressed(.z)) offset -= 12;
+
         // draw UI
         rl.beginDrawing();
         defer rl.endDrawing();
         rl.clearBackground(.black);
-        rl.drawText("Press A-L keys to play notes", 20, 20, 20, .white);
+        rl.drawText("Press A-L keys to play notes (W, E, etc. for sharp/flat). Z/X to change octave", 20, 20, 20, .white);
         rl.drawText("Press ESC to quit", 20, 50, 20, .gray);
+        rl.drawText("Up / Down to change filter cutoff", 20, 70, 20, .white);
         var buf: [160]u8 = undefined;
         const line = std.fmt.bufPrintZ(
             &buf,
-            "cutoff: {d:.0}",
-            .{params.cutoff},
+            "cutoff: {d:.0}, offset: {d:.0}",
+            .{ params.cutoff, @divTrunc(offset, 12) },
         ) catch "params";
         rl.drawText(line, 90, 90, 20, .white);
     }
