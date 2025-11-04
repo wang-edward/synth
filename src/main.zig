@@ -159,90 +159,72 @@ fn audioThreadMain() !void {
     }
 }
 
-// main (raylib on UI thread)
-fn clampF(v: f32, lo: f32, hi: f32) f32 {
-    return if (v < lo) lo else if (v > hi) hi else v;
+fn keyToMidi(key: rl.KeyboardKey) ?u8 {
+    return switch (key) {
+        .z => 60, // C4
+        .s => 61,
+        .x => 62,
+        .d => 63,
+        .c => 64,
+        .v => 65,
+        .g => 66,
+        .b => 67,
+        .h => 68,
+        .n => 69,
+        .j => 70,
+        .m => 71,
+        else => null,
+    };
 }
-
 pub fn main() !void {
     defer _ = gpa.deinit();
 
-    // start audio thread first
+    leSynth = try synth.Synth.init(A, 8);
+    defer leSynth.deinit(A);
+
     var audio_thread = try std.Thread.spawn(.{}, audioThreadMain, .{});
     defer {
         g_run_audio.store(false, .release);
-        // wake audio thread out of soundio_wait_events
-        if (g_sio_ptr.load(.acquire)) |p| {
-            c.soundio_wakeup(p);
-        }
+        if (g_sio_ptr.load(.acquire)) |p| c.soundio_wakeup(p);
         audio_thread.join();
     }
 
-    // raylib window on the main thread
-    const screenWidth = 800;
-    const screenHeight = 450;
-    rl.initWindow(screenWidth, screenHeight, "raylib + libsoundio (ping-pong params)");
+    const w = 640;
+    const h = 360;
+    rl.initWindow(w, h, "Zig Synth");
     defer rl.closeWindow();
     rl.setTargetFPS(60);
+    const note_keys = [_]rl.KeyboardKey{
+        .z, .s, .x, .d, .c, .v, .g, .b, .h, .n, .j, .m,
+    };
 
-    var x: i32 = 200;
-    var y: i32 = 200;
+    var key_state = std.AutoHashMap(rl.KeyboardKey, bool).init(A);
+    defer key_state.deinit();
+    for (note_keys) |k| try key_state.put(k, false);
 
     while (!rl.windowShouldClose()) {
-        // move a circle (just to have some UI activity)
-        if (rl.isKeyDown(.right)) x += 5;
-        if (rl.isKeyDown(.left)) x -= 5;
-        if (rl.isKeyDown(.up)) y -= 5;
-        if (rl.isKeyDown(.down)) y += 5;
+        for (note_keys) |key| {
+            const down = rl.isKeyDown(key);
+            const prev = key_state.get(key).?;
 
-        // read current slot (optional; for displaying current values)
-        const cur = g_params_slots[g_params_idx.load(.acquire)];
+            if (down and !prev) {
+                // key pressed
+                if (keyToMidi(key)) |note| leSynth.noteOn(note);
+                std.debug.print("key pressed {}\n", .{key});
+            } else if (!down and prev) {
+                // key released
+                if (keyToMidi(key)) |note| leSynth.noteOff(note);
+                std.debug.print("key released {}\n", .{key});
+            }
 
-        var a = cur.oscA_hz;
-        var d = cur.drive;
-        var m = cur.mix;
-        var cut = cur.cutoff;
+            try key_state.put(key, down);
+        }
 
-        // controls: A/Z = freqA +/- ; S/X = drive +/- ; D/C = mix +/-
-        if (rl.isKeyPressed(.a)) a += 10.0;
-        if (rl.isKeyPressed(.z)) a -= 10.0;
-        if (rl.isKeyPressed(.s)) d += 0.25;
-        if (rl.isKeyPressed(.x)) d -= 0.25;
-        if (rl.isKeyPressed(.d)) m += 0.05;
-        if (rl.isKeyPressed(.c)) m -= 0.05;
-        if (rl.isKeyPressed(.q)) cut -= 200.0;
-        if (rl.isKeyPressed(.w)) cut += 200.0;
-
-        a = clampF(a, 50.0, 2000.0);
-        d = clampF(d, 1.0, 10.0);
-        m = clampF(m, 0.0, 1.0);
-        cut = clampF(cut, 100.0, 10000.0);
-
-        // read current (front) to start from existing values
-        var next = g_params_slots[g_params_idx.load(.acquire)];
-
-        // tweak fields from UI
-        next.oscA_hz = a;
-        next.drive = d;
-        next.mix = m;
-        next.cutoff = cut;
-
-        // publish to back, then flip
-        paramsPublish(next);
-
-        // Draw
+        // draw UI
         rl.beginDrawing();
         defer rl.endDrawing();
         rl.clearBackground(.black);
-        rl.drawCircle(x, y, 60, .white);
-
-        var buf: [160]u8 = undefined;
-        const line = std.fmt.bufPrintZ(
-            &buf,
-            "A/Z freqA: {d:.1}  S/X drive: {d:.2}  D/C mix: {d:.2}  Q/W cutoff: {d:.0}",
-            .{ a, d, m, cut },
-        ) catch "params";
-        rl.drawText(line, 20, 20, 20, .light_gray);
-        rl.drawText("Audio on dedicated thread; params via double buffer + atomic index.", 20, 50, 18, .gray);
+        rl.drawText("Press Z-M keys to play notes", 20, 20, 20, .white);
+        rl.drawText("Press ESC to quit", 20, 50, 20, .gray);
     }
 }
