@@ -75,7 +75,7 @@ pub const Synth = struct {
         std.debug.assert(count <= NODE_BUF_SIZE);
         var node_buf: [NODE_BUF_SIZE]audio.Node = undefined;
         const nodes = node_buf[0..count];
-        for (s.voices, 0..) |*v, i| nodes[i] = v.*.asNode(); // const?
+        for (s.voices, 0..) |v, i| nodes[i] = v.asNode(); // const?
 
         s.mixer = try audio.Mixer.init(alloc, nodes);
         s.next_idx = 0;
