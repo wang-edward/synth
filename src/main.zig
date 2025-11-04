@@ -161,21 +161,31 @@ fn audioThreadMain() !void {
 
 fn keyToMidi(key: rl.KeyboardKey) ?u8 {
     return switch (key) {
-        .z => 60, // C4
-        .s => 61,
-        .x => 62,
-        .d => 63,
-        .c => 64,
-        .v => 65,
-        .g => 66,
-        .b => 67,
-        .h => 68,
-        .n => 69,
-        .j => 70,
-        .m => 71,
+        // --- white keys (A–L) ---
+        .a => 48, // C3
+        .s => 50, // D3
+        .d => 52, // E3
+        .f => 53, // F3
+        .g => 55, // G3
+        .h => 57, // A3
+        .j => 59, // B3
+        .k => 60, // C4
+        .l => 62, // D4
+        .semicolon => 64, // E4
+        .apostrophe => 65, // F4
+
+        // --- black keys (W–O) ---
+        .w => 49, // C#3
+        .e => 51, // D#3
+        .t => 54, // F#3
+        .y => 56, // G#3
+        .u => 58, // A#3
+        .o => 61, // C#4
+        .p => 63, // D#4
         else => null,
     };
 }
+
 pub fn main() !void {
     defer _ = gpa.deinit();
 
@@ -192,7 +202,8 @@ pub fn main() !void {
     defer rl.closeWindow();
     rl.setTargetFPS(60);
     const note_keys = [_]rl.KeyboardKey{
-        .z, .s, .x, .d, .c, .v, .g, .b, .h, .n, .j, .m,
+        .a, .w, .s, .e, .d,         .f,          .t, .g, .y, .h, .u, .j,
+        .k, .o, .l, .p, .semicolon, .apostrophe,
     };
 
     var key_state = std.AutoHashMap(rl.KeyboardKey, bool).init(A);
