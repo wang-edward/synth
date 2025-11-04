@@ -3,7 +3,7 @@
 how to get zig 0.15.1
 ```
 brew install asdf
-asdf plugin add zig https://github.com/cheetah/asdf-zig.git
+asdf plugin add zig https://github.com/asdf-community/asdf-zig.git
 asdf install zig 0.15.1
 asdf set zig 0.15.1
 zig env
