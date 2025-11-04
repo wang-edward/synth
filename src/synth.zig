@@ -12,6 +12,7 @@ const Voice = struct {
     sub: audio.Osc,
     // noise: audio.Noise, // TODO
     mixer: *audio.Mixer, // TODO rename mixer
+    lpf: audio.Lpf,
     gate: audio.Gate,
 
     noteState: NoteState = .Off,
@@ -24,7 +25,8 @@ const Voice = struct {
         v.mixer = try audio.Mixer.init(alloc, &[_]audio.Node{
             v.pwm.asNode(), v.saw.asNode(), v.sub.asNode(),
         });
-        v.gate = audio.Gate.init(v.mixer.asNode());
+        v.lpf = audio.Lpf.init(v.mixer.asNode(), 1.0, 0.5, 5000.0);
+        v.gate = audio.Gate.init(v.lpf.asNode());
         v.noteState = .Off;
         return v;
     }
@@ -52,6 +54,9 @@ const Voice = struct {
             },
             else => {},
         }
+    }
+    pub fn setLpfCutoff(self: *Voice, cutoff: f32) void {
+        self.lpf.cutoff = cutoff;
     }
 };
 
@@ -84,6 +89,9 @@ pub const Synth = struct {
         alloc.free(self.voices);
         alloc.destroy(self);
     }
+    pub fn asNode(self: *Synth) audio.Node {
+        return self.mixer.asNode();
+    }
     pub fn noteOn(self: *Synth, note: u8) void {
         const idx = self.next_idx;
         self.next_idx = (self.next_idx + 1) % self.voices.len;
@@ -96,8 +104,8 @@ pub const Synth = struct {
         for (self.voices) |v| v.setNoteOff(note);
         // TODO raise warning if note not found?
     }
-    pub fn asNode(self: *Synth) audio.Node {
-        return self.mixer.asNode();
+    pub fn setLpfCutoff(self: *Synth, cutoff: f32) void {
+        for (self.voices) |v| v.setLpfCutoff(cutoff);
     }
 };
 

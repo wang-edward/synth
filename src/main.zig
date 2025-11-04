@@ -5,12 +5,9 @@ const audio = @import("audio.zig");
 const synth = @import("synth.zig");
 
 const SharedParams = struct {
-    oscA_hz: f32 = 440.0,
-    oscB_hz: f32 = 523.25,
-    oscC_hz: f32 = 659.255,
-    drive: f32 = 4.0,
-    mix: f32 = 1.0,
-    cutoff: f32 = 2000.0,
+    drive: f32 = 1.0,
+    resonance: f32 = 1.0,
+    cutoff: f32 = 4000.0,
 };
 
 var g_params_slots: [2]SharedParams = .{ .{}, .{} }; // front/back
@@ -69,7 +66,8 @@ fn write_callback(
     const chans: usize = @intCast(layout.channel_count);
 
     // Snapshot params once per callback
-    // const p = paramsReadSnapshot();
+    const p = paramsReadSnapshot();
+    leSynth.setLpfCutoff(p.cutoff);
 
     var frames_left = max;
 
@@ -206,6 +204,9 @@ pub fn main() !void {
         .k, .o, .l, .p, .semicolon, .apostrophe,
     };
 
+    var params = SharedParams{};
+    paramsPublish(params);
+
     var key_state = std.AutoHashMap(rl.KeyboardKey, bool).init(A);
     defer key_state.deinit();
     for (note_keys) |k| try key_state.put(k, false);
@@ -228,11 +229,24 @@ pub fn main() !void {
             try key_state.put(key, down);
         }
 
+        if (rl.isKeyPressed(.up)) params.cutoff *= 1.1;
+        if (rl.isKeyPressed(.down)) params.cutoff *= 0.9;
+        params.cutoff = std.math.clamp(params.cutoff, 100.0, 5000.0);
+
+        paramsPublish(params);
+
         // draw UI
         rl.beginDrawing();
         defer rl.endDrawing();
         rl.clearBackground(.black);
-        rl.drawText("Press Z-M keys to play notes", 20, 20, 20, .white);
+        rl.drawText("Press A-L keys to play notes", 20, 20, 20, .white);
         rl.drawText("Press ESC to quit", 20, 50, 20, .gray);
+        var buf: [160]u8 = undefined;
+        const line = std.fmt.bufPrintZ(
+            &buf,
+            "cutoff: {d:.0}",
+            .{params.cutoff},
+        ) catch "params";
+        rl.drawText(line, 90, 90, 20, .white);
     }
 }
