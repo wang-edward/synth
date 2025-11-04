@@ -213,3 +213,26 @@ pub const Distortion = struct {
         return .{ .ptr = self, .v = &self.vt };
     }
 };
+
+pub const Gate = struct {
+    input: Node,
+    open: bool,
+    vt: VTable = .{ .process = Gate._process },
+
+    pub fn init(input: Node) Gate {
+        return .{ .input = input, .open = false };
+    }
+
+    fn _process(p: *anyopaque, ctx: *Context, out: []Sample) void {
+        var self: *Gate = @ptrCast(@alignCast(p));
+        if (!self.open) {
+            @memset(out, 0);
+            return;
+        }
+        self.input.v.process(self.input.ptr, ctx, out);
+    }
+
+    pub fn asNode(self: *Gate) Node {
+        return .{ .ptr = self, .v = &self.vt };
+    }
+};
