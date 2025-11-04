@@ -61,24 +61,24 @@ pub const Osc = struct {
     }
 };
 
-pub const Hpf = struct {
+pub const Lpf = struct {
     // References: "An Improved Virtual Analog Model of the Moog Ladder Filter"
     // Original Implementation: D'Angelo, Valimaki
     pub const THERMAL_VOLTAGE = 0.312;
-    input: *const Node,
+    input: Node,
     V: [4]f32 = undefined,
     dV: [4]f32 = undefined,
     tV: [4]f32 = undefined,
     drive: f32,
     resonance: f32,
     cutoff: f32,
-    vt: VTable = .{ .process = Hpf._process },
+    vt: VTable = .{ .process = Lpf._process },
 
-    pub fn init(input: *const Node, drive: f32, resonance: f32, cutoff: f32) Hpf {
+    pub fn init(input: Node, drive: f32, resonance: f32, cutoff: f32) Lpf {
         return .{ .input = input, .drive = drive, .resonance = resonance, .cutoff = cutoff };
     }
     fn _process(p: *anyopaque, ctx: *Context, out: []Sample) void {
-        var self: *Hpf = @ptrCast(@alignCast(p));
+        var self: *Lpf = @ptrCast(@alignCast(p));
         const in = ctx.tmp().alloc(Sample, out.len) catch unreachable;
         self.input.v.process(self.input.ptr, ctx, in);
 
@@ -112,17 +112,17 @@ pub const Hpf = struct {
             out[i] = self.V[3];
         }
     }
-    pub fn asNode(self: *Hpf) Node {
+    pub fn asNode(self: *Lpf) Node {
         return .{ .ptr = self, .v = &self.vt };
     }
 };
 
 pub const Gain = struct {
-    input: *const Node,
+    input: Node,
     gain: f32,
     vt: VTable = .{ .process = Gain._process },
 
-    pub fn init(input: *const Node, gain: f32) Gain {
+    pub fn init(input: Node, gain: f32) Gain {
         return .{ .input = input, .gain = gain };
     }
     fn _process(p: *anyopaque, ctx: *Context, out: []Sample) void {
@@ -137,24 +137,27 @@ pub const Gain = struct {
 };
 
 pub const Mixer = struct {
-    inputs: []*const Node,
+    inputs: []Node,
     vt: VTable = .{ .process = Mixer._process },
 
-    pub fn init(a: std.mem.Allocator, inputs: []const *const Node) !*Mixer {
+    pub fn init(a: std.mem.Allocator, inputs: []const Node) !*Mixer {
         const m = try a.create(Mixer);
-        m.* = .{ .inputs = try a.alloc(*const Node, inputs.len) };
-        std.mem.copyForwards(*const Node, m.inputs, inputs);
+        m.* = .{ .inputs = try a.alloc(Node, inputs.len) };
+        std.mem.copyForwards(Node, m.inputs, inputs);
         return m;
     }
+
     fn _process(p: *anyopaque, ctx: *Context, out: []Sample) void {
         const self: *Mixer = @ptrCast(@alignCast(p));
         @memset(out, 0);
+
         for (self.inputs) |n| {
             const tmp = ctx.tmp().alloc(Sample, out.len) catch unreachable;
             n.v.process(n.ptr, ctx, tmp);
             for (out, tmp) |*o, x| o.* += x;
         }
     }
+
     pub fn asNode(self: *Mixer) Node {
         return .{ .ptr = self, .v = &self.vt };
     }
@@ -163,13 +166,13 @@ pub const Mixer = struct {
 pub const Distortion = struct {
     pub const Mode = enum { hard, soft, tanh };
 
-    input: *const Node,
+    input: Node,
     drive: f32, // >= 1.0 for more distortion
     mix: f32, // 0 = dry, 1 = wet
     mode: Mode = .soft,
     vt: VTable = .{ .process = Distortion._process },
 
-    pub fn init(input: *const Node, drive: f32, mix: f32, mode: Mode) Distortion {
+    pub fn init(input: Node, drive: f32, mix: f32, mode: Mode) Distortion {
         return .{ .input = input, .drive = drive, .mix = mix, .mode = mode };
     }
 
@@ -207,6 +210,29 @@ pub const Distortion = struct {
     }
 
     pub fn asNode(self: *Distortion) Node {
+        return .{ .ptr = self, .v = &self.vt };
+    }
+};
+
+pub const Gate = struct {
+    input: Node,
+    open: bool,
+    vt: VTable = .{ .process = Gate._process },
+
+    pub fn init(input: Node) Gate {
+        return .{ .input = input, .open = false };
+    }
+
+    fn _process(p: *anyopaque, ctx: *Context, out: []Sample) void {
+        var self: *Gate = @ptrCast(@alignCast(p));
+        if (!self.open) {
+            @memset(out, 0);
+            return;
+        }
+        self.input.v.process(self.input.ptr, ctx, out);
+    }
+
+    pub fn asNode(self: *Gate) Node {
         return .{ .ptr = self, .v = &self.vt };
     }
 };

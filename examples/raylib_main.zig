@@ -38,8 +38,24 @@ var scratch_fba = std.heap.FixedBufferAllocator.init(&scratch_mem);
 var context: audio.Context = undefined;
 
 // graph objects
-var leSynth: *synth.Synth = undefined;
+var oscA = audio.Osc.init(440, .{ .sine = .{} });
+var oscB = audio.Osc.init(523.25, .{ .pwm = .{} });
+var oscC = audio.Osc.init(659.255, .{ .saw = .{} });
+var nodeOscA = oscA.asNode();
+var nodeOscB = oscB.asNode();
+var nodeOscC = oscC.asNode();
+
+var gA = audio.Gain.init(&nodeOscA, 0.2);
+var gB = audio.Gain.init(&nodeOscB, 0.2);
+var gC = audio.Gain.init(&nodeOscC, 0.2);
+var nodeGA = gA.asNode();
+var nodeGB = gB.asNode();
+var nodeGC = gC.asNode();
+
+var mixer: *audio.Mixer = undefined;
 var root: audio.Node = undefined;
+var dist: audio.Distortion = undefined;
+var hpf: audio.Lpf = undefined;
 
 // libsoundio state (used only on audio thread)
 var sio: ?*c.SoundIo = null;
@@ -69,7 +85,15 @@ fn write_callback(
     const chans: usize = @intCast(layout.channel_count);
 
     // Snapshot params once per callback
-    // const p = paramsReadSnapshot();
+    const p = paramsReadSnapshot();
+
+    // Apply to graph up-front (no atomics in hot loop)
+    oscA.freq = p.oscA_hz;
+    oscB.freq = p.oscB_hz;
+    oscC.freq = p.oscC_hz;
+    dist.drive = p.drive;
+    dist.mix = p.mix;
+    hpf.cutoff = p.cutoff;
 
     var frames_left = max;
 
@@ -115,10 +139,17 @@ fn underflow_callback(_: ?[*]c.SoundIoOutStream) callconv(.c) void {
 // =============================== Audio thread entry ==================================
 fn audioThreadMain() !void {
     // Build graph heap storage (Mixer inputs array)
-
-    leSynth = try synth.Synth.init(A, 4);
-    defer leSynth.deinit(A);
-    root = leSynth.asNode();
+    mixer = try audio.Mixer.init(A, &[_]*const audio.Node{ &nodeGA, &nodeGB, &nodeGC });
+    defer A.free(mixer.inputs);
+    defer A.destroy(mixer);
+    // dist = audio.Distortion.init(&mixer.asNode(), 4.0, 1.0, .hard);
+    hpf = audio.Lpf.init(
+        &mixer.asNode(),
+        1.0,
+        1.0,
+        1_000,
+    );
+    root = hpf.asNode();
 
     // SoundIO setup
     sio = c.soundio_create();
@@ -159,80 +190,90 @@ fn audioThreadMain() !void {
     }
 }
 
-fn keyToMidi(key: rl.KeyboardKey) ?u8 {
-    return switch (key) {
-        // --- white keys (A–L) ---
-        .a => 48, // C3
-        .s => 50, // D3
-        .d => 52, // E3
-        .f => 53, // F3
-        .g => 55, // G3
-        .h => 57, // A3
-        .j => 59, // B3
-        .k => 60, // C4
-        .l => 62, // D4
-        .semicolon => 64, // E4
-        .apostrophe => 65, // F4
-
-        // --- black keys (W–O) ---
-        .w => 49, // C#3
-        .e => 51, // D#3
-        .t => 54, // F#3
-        .y => 56, // G#3
-        .u => 58, // A#3
-        .o => 61, // C#4
-        .p => 63, // D#4
-        else => null,
-    };
+// main (raylib on UI thread)
+fn clampF(v: f32, lo: f32, hi: f32) f32 {
+    return if (v < lo) lo else if (v > hi) hi else v;
 }
 
 pub fn main() !void {
     defer _ = gpa.deinit();
 
+    // start audio thread first
     var audio_thread = try std.Thread.spawn(.{}, audioThreadMain, .{});
     defer {
         g_run_audio.store(false, .release);
-        if (g_sio_ptr.load(.acquire)) |p| c.soundio_wakeup(p);
+        // wake audio thread out of soundio_wait_events
+        if (g_sio_ptr.load(.acquire)) |p| {
+            c.soundio_wakeup(p);
+        }
         audio_thread.join();
     }
 
-    const w = 640;
-    const h = 360;
-    rl.initWindow(w, h, "Zig Synth");
+    // raylib window on the main thread
+    const screenWidth = 800;
+    const screenHeight = 450;
+    rl.initWindow(screenWidth, screenHeight, "raylib + libsoundio (ping-pong params)");
     defer rl.closeWindow();
     rl.setTargetFPS(60);
-    const note_keys = [_]rl.KeyboardKey{
-        .a, .w, .s, .e, .d,         .f,          .t, .g, .y, .h, .u, .j,
-        .k, .o, .l, .p, .semicolon, .apostrophe,
-    };
 
-    var key_state = std.AutoHashMap(rl.KeyboardKey, bool).init(A);
-    defer key_state.deinit();
-    for (note_keys) |k| try key_state.put(k, false);
+    var x: i32 = 200;
+    var y: i32 = 200;
 
     while (!rl.windowShouldClose()) {
-        for (note_keys) |key| {
-            const down = rl.isKeyDown(key);
-            const prev = key_state.get(key).?;
+        // move a circle (just to have some UI activity)
+        if (rl.isKeyDown(.right)) x += 5;
+        if (rl.isKeyDown(.left)) x -= 5;
+        if (rl.isKeyDown(.up)) y -= 5;
+        if (rl.isKeyDown(.down)) y += 5;
 
-            if (down and !prev) {
-                // key pressed
-                if (keyToMidi(key)) |note| leSynth.noteOn(note);
-                std.debug.print("key pressed {}\n", .{key});
-            } else if (!down and prev) {
-                // key released
-                if (keyToMidi(key)) |note| leSynth.noteOff(note);
-                std.debug.print("key released {}\n", .{key});
-            }
+        // read current slot (optional; for displaying current values)
+        const cur = g_params_slots[g_params_idx.load(.acquire)];
 
-            try key_state.put(key, down);
-        }
+        var a = cur.oscA_hz;
+        var d = cur.drive;
+        var m = cur.mix;
+        var cut = cur.cutoff;
 
-        // draw UI
+        // controls: A/Z = freqA +/- ; S/X = drive +/- ; D/C = mix +/-
+        if (rl.isKeyPressed(.a)) a += 10.0;
+        if (rl.isKeyPressed(.z)) a -= 10.0;
+        if (rl.isKeyPressed(.s)) d += 0.25;
+        if (rl.isKeyPressed(.x)) d -= 0.25;
+        if (rl.isKeyPressed(.d)) m += 0.05;
+        if (rl.isKeyPressed(.c)) m -= 0.05;
+        if (rl.isKeyPressed(.q)) cut -= 200.0;
+        if (rl.isKeyPressed(.w)) cut += 200.0;
+
+        a = clampF(a, 50.0, 2000.0);
+        d = clampF(d, 1.0, 10.0);
+        m = clampF(m, 0.0, 1.0);
+        cut = clampF(cut, 100.0, 10000.0);
+
+        // read current (front) to start from existing values
+        var next = g_params_slots[g_params_idx.load(.acquire)];
+
+        // tweak fields from UI
+        next.oscA_hz = a;
+        next.drive = d;
+        next.mix = m;
+        next.cutoff = cut;
+
+        // publish to back, then flip
+        paramsPublish(next);
+
+        // Draw
         rl.beginDrawing();
         defer rl.endDrawing();
         rl.clearBackground(.black);
-        rl.drawText("Press Z-M keys to play notes", 20, 20, 20, .white);
-        rl.drawText("Press ESC to quit", 20, 50, 20, .gray);
+        rl.drawCircle(x, y, 60, .white);
+
+        var buf: [160]u8 = undefined;
+        const line = std.fmt.bufPrintZ(
+            &buf,
+            "A/Z freqA: {d:.1}  S/X drive: {d:.2}  D/C mix: {d:.2}  Q/W cutoff: {d:.0}",
+            .{ a, d, m, cut },
+        ) catch "params";
+        rl.drawText(line, 20, 20, 20, .light_gray);
+        rl.drawText("Audio on dedicated thread; params via double buffer + atomic index.", 20, 50, 18, .gray);
     }
 }
