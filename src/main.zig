@@ -38,19 +38,13 @@ var scratch_fba = std.heap.FixedBufferAllocator.init(&scratch_mem);
 var context: audio.Context = undefined;
 
 // graph objects
-var oscA = audio.Osc.init(440, .{ .sine = .{} });
-var oscB = audio.Osc.init(523.25, .{ .pwm = .{} });
-var oscC = audio.Osc.init(659.255, .{ .saw = .{} });
-var nodeOscA = oscA.asNode();
-var nodeOscB = oscB.asNode();
-var nodeOscC = oscC.asNode();
+var oscA: audio.Osc = undefined;
+var oscB: audio.Osc = undefined;
+var oscC: audio.Osc = undefined;
 
-var gA = audio.Gain.init(&nodeOscA, 0.2);
-var gB = audio.Gain.init(&nodeOscB, 0.2);
-var gC = audio.Gain.init(&nodeOscC, 0.2);
-var nodeGA = gA.asNode();
-var nodeGB = gB.asNode();
-var nodeGC = gC.asNode();
+var gA: audio.Gain = undefined;
+var gB: audio.Gain = undefined;
+var gC: audio.Gain = undefined;
 
 var mixer: *audio.Mixer = undefined;
 var root: audio.Node = undefined;
@@ -139,12 +133,23 @@ fn underflow_callback(_: ?[*]c.SoundIoOutStream) callconv(.c) void {
 // =============================== Audio thread entry ==================================
 fn audioThreadMain() !void {
     // Build graph heap storage (Mixer inputs array)
-    mixer = try audio.Mixer.init(A, &[_]*const audio.Node{ &nodeGA, &nodeGB, &nodeGC });
-    defer A.free(mixer.inputs);
-    defer A.destroy(mixer);
+
+    oscA = audio.Osc.init(440, .{ .sine = .{} });
+    oscB = audio.Osc.init(523.25, .{ .pwm = .{} });
+    oscC = audio.Osc.init(659.255, .{ .saw = .{} });
+
+    gA = audio.Gain.init(oscA.asNode(), 0.2);
+    gB = audio.Gain.init(oscB.asNode(), 0.2);
+    gC = audio.Gain.init(oscC.asNode(), 0.2);
+
+    mixer = try audio.Mixer.init(A, &[_]audio.Node{ gA.asNode(), gB.asNode(), gC.asNode() });
+    defer {
+        A.free(mixer.inputs);
+        A.destroy(mixer);
+    }
     // dist = audio.Distortion.init(&mixer.asNode(), 4.0, 1.0, .hard);
     hpf = audio.Lpf.init(
-        &mixer.asNode(),
+        mixer.asNode(),
         1.0,
         1.0,
         1_000,

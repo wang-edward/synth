@@ -34,7 +34,7 @@ const Voice = struct {
         alloc.free(self.mix.inputs);
         alloc.destroy(self.mix);
     }
-    pub fn asNode(self: *Voice) *const audio.Node {
+    pub fn asNode(self: *Voice) audio.Node {
         return self.mix.asNode();
     }
 };
@@ -91,7 +91,7 @@ const Synth = struct {
         }
         // TODO raise warning if note not found?
     }
-    pub fn asNode(self: *Voice) *const audio.Node {
+    pub fn asNode(self: *Voice) audio.Node {
         return self.mix.asNode();
     }
 };

@@ -65,7 +65,7 @@ pub const Lpf = struct {
     // References: "An Improved Virtual Analog Model of the Moog Ladder Filter"
     // Original Implementation: D'Angelo, Valimaki
     pub const THERMAL_VOLTAGE = 0.312;
-    input: *const Node,
+    input: Node,
     V: [4]f32 = undefined,
     dV: [4]f32 = undefined,
     tV: [4]f32 = undefined,
@@ -74,7 +74,7 @@ pub const Lpf = struct {
     cutoff: f32,
     vt: VTable = .{ .process = Lpf._process },
 
-    pub fn init(input: *const Node, drive: f32, resonance: f32, cutoff: f32) Lpf {
+    pub fn init(input: Node, drive: f32, resonance: f32, cutoff: f32) Lpf {
         return .{ .input = input, .drive = drive, .resonance = resonance, .cutoff = cutoff };
     }
     fn _process(p: *anyopaque, ctx: *Context, out: []Sample) void {
@@ -118,11 +118,11 @@ pub const Lpf = struct {
 };
 
 pub const Gain = struct {
-    input: *const Node,
+    input: Node,
     gain: f32,
     vt: VTable = .{ .process = Gain._process },
 
-    pub fn init(input: *const Node, gain: f32) Gain {
+    pub fn init(input: Node, gain: f32) Gain {
         return .{ .input = input, .gain = gain };
     }
     fn _process(p: *anyopaque, ctx: *Context, out: []Sample) void {
@@ -166,13 +166,13 @@ pub const Mixer = struct {
 pub const Distortion = struct {
     pub const Mode = enum { hard, soft, tanh };
 
-    input: *const Node,
+    input: Node,
     drive: f32, // >= 1.0 for more distortion
     mix: f32, // 0 = dry, 1 = wet
     mode: Mode = .soft,
     vt: VTable = .{ .process = Distortion._process },
 
-    pub fn init(input: *const Node, drive: f32, mix: f32, mode: Mode) Distortion {
+    pub fn init(input: Node, drive: f32, mix: f32, mode: Mode) Distortion {
         return .{ .input = input, .drive = drive, .mix = mix, .mode = mode };
     }
 
