@@ -38,18 +38,8 @@ var scratch_fba = std.heap.FixedBufferAllocator.init(&scratch_mem);
 var context: audio.Context = undefined;
 
 // graph objects
-var oscA: audio.Osc = undefined;
-var oscB: audio.Osc = undefined;
-var oscC: audio.Osc = undefined;
-
-var gA: audio.Gain = undefined;
-var gB: audio.Gain = undefined;
-var gC: audio.Gain = undefined;
-
-var mixer: *audio.Mixer = undefined;
+var leSynth: synth.Synth = undefined;
 var root: audio.Node = undefined;
-var dist: audio.Distortion = undefined;
-var hpf: audio.Lpf = undefined;
 
 // libsoundio state (used only on audio thread)
 var sio: ?*c.SoundIo = null;
@@ -134,27 +124,8 @@ fn underflow_callback(_: ?[*]c.SoundIoOutStream) callconv(.c) void {
 fn audioThreadMain() !void {
     // Build graph heap storage (Mixer inputs array)
 
-    oscA = audio.Osc.init(440, .{ .sine = .{} });
-    oscB = audio.Osc.init(523.25, .{ .pwm = .{} });
-    oscC = audio.Osc.init(659.255, .{ .saw = .{} });
-
-    gA = audio.Gain.init(oscA.asNode(), 0.2);
-    gB = audio.Gain.init(oscB.asNode(), 0.2);
-    gC = audio.Gain.init(oscC.asNode(), 0.2);
-
-    mixer = try audio.Mixer.init(A, &[_]audio.Node{ gA.asNode(), gB.asNode(), gC.asNode() });
-    defer {
-        A.free(mixer.inputs);
-        A.destroy(mixer);
-    }
-    // dist = audio.Distortion.init(&mixer.asNode(), 4.0, 1.0, .hard);
-    hpf = audio.Lpf.init(
-        mixer.asNode(),
-        1.0,
-        1.0,
-        1_000,
-    );
-    root = hpf.asNode();
+    leSynth = synth.Synth.init(A, 4);
+    root = leSynth.asNode();
 
     // SoundIO setup
     sio = c.soundio_create();
