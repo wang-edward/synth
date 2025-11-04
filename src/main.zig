@@ -38,7 +38,7 @@ var scratch_fba = std.heap.FixedBufferAllocator.init(&scratch_mem);
 var context: audio.Context = undefined;
 
 // graph objects
-var leSynth: synth.Synth = undefined;
+var leSynth: *synth.Synth = undefined;
 var root: audio.Node = undefined;
 
 // libsoundio state (used only on audio thread)
@@ -69,15 +69,7 @@ fn write_callback(
     const chans: usize = @intCast(layout.channel_count);
 
     // Snapshot params once per callback
-    const p = paramsReadSnapshot();
-
-    // Apply to graph up-front (no atomics in hot loop)
-    oscA.freq = p.oscA_hz;
-    oscB.freq = p.oscB_hz;
-    oscC.freq = p.oscC_hz;
-    dist.drive = p.drive;
-    dist.mix = p.mix;
-    hpf.cutoff = p.cutoff;
+    // const p = paramsReadSnapshot();
 
     var frames_left = max;
 
@@ -124,7 +116,8 @@ fn underflow_callback(_: ?[*]c.SoundIoOutStream) callconv(.c) void {
 fn audioThreadMain() !void {
     // Build graph heap storage (Mixer inputs array)
 
-    leSynth = synth.Synth.init(A, 4);
+    leSynth = try synth.Synth.init(A, 4);
+    defer leSynth.deinit(A);
     root = leSynth.asNode();
 
     // SoundIO setup
