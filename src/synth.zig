@@ -19,8 +19,8 @@ const Voice = struct {
         var pwm = audio.Osc.init(freq, .{ .pwm = .{} });
         var saw = audio.Osc.init(freq, .{ .saw = .{} });
         var sub = audio.Osc.init(freq, .{ .sub = .{} });
-        const mixer = try audio.Mixer.init(alloc, &[_]*const audio.Node{
-            &pwm.asNode(), &saw.asNode(), &sub.asNode(),
+        const mixer = try audio.Mixer.init(alloc, &[_]audio.Node{
+            pwm.asNode(), saw.asNode(), sub.asNode(),
         });
         return .{
             .pwm = pwm,
@@ -31,7 +31,7 @@ const Voice = struct {
         };
     }
     pub fn deinit(self: *Voice, alloc: std.mem.Allocator) void {
-        alloc.free(self.mix.inputs);
+        alloc.free(self.mixer.inputs);
         alloc.destroy(self.mix);
     }
     pub fn asNode(self: *Voice) audio.Node {
@@ -39,7 +39,7 @@ const Voice = struct {
     }
 };
 
-const Synth = struct {
+pub const Synth = struct {
     const SYNTH_TUNING: f32 = 440.0;
     voices: []Voice,
     mixer: *audio.Mixer,
@@ -48,11 +48,11 @@ const Synth = struct {
     pub fn init(alloc: std.mem.Allocator, count: usize) !*Synth {
         const s = try alloc.create(Synth);
         s.voices = try alloc.alloc(Voice, count);
-        for (s.voices) |*v| v.* = Voice.init(0.0);
+        for (s.voices) |*v| v.* = try Voice.init(alloc, 0.0);
 
         const NODE_BUF_SIZE = 16;
         std.debug.assert(count <= NODE_BUF_SIZE);
-        var node_buf: [NODE_BUF_SIZE]*const audio.Node = undefined;
+        var node_buf: [NODE_BUF_SIZE]audio.Node = undefined;
         const nodes = node_buf[0..count];
         for (s.voices, 0..) |*v, i| nodes[i] = v.asNode(); // const?
 
@@ -63,7 +63,7 @@ const Synth = struct {
     }
     pub fn deinit(self: *Synth, alloc: std.mem.Allocator) void {
         for (self.voices) |*v| v.deinit(alloc);
-        alloc.free(self.mix.inputs);
+        alloc.free(self.mixer.inputs);
         alloc.destroy(self.mix);
         alloc.free(self.voices);
         alloc.destroy(self);
