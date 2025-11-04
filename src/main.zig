@@ -179,9 +179,6 @@ fn keyToMidi(key: rl.KeyboardKey) ?u8 {
 pub fn main() !void {
     defer _ = gpa.deinit();
 
-    leSynth = try synth.Synth.init(A, 8);
-    defer leSynth.deinit(A);
-
     var audio_thread = try std.Thread.spawn(.{}, audioThreadMain, .{});
     defer {
         g_run_audio.store(false, .release);

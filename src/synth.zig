@@ -78,7 +78,7 @@ pub const Synth = struct {
         return s;
     }
     pub fn deinit(self: *Synth, alloc: std.mem.Allocator) void {
-        for (self.voices) |*v| v.*.deinit(alloc);
+        for (self.voices) |v| v.deinit(alloc);
         alloc.free(self.mixer.inputs);
         alloc.destroy(self.mixer);
         alloc.free(self.voices);
