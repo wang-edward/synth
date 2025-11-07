@@ -11,7 +11,7 @@ const Voice = struct {
     saw: audio.Osc,
     sub: audio.Osc,
     // noise: audio.Noise, // TODO
-    mixer: *audio.Mixer, // TODO rename mixer
+    mixer: *audio.Mixer,
     lpf: audio.Lpf,
     gate: audio.Gate,
 
@@ -92,11 +92,24 @@ pub const Synth = struct {
     pub fn asNode(self: *Synth) audio.Node {
         return self.mixer.asNode();
     }
+    fn findFreeVoice(self: *Synth) ?*Voice {
+        for (self.voices) |v| {
+            switch (v.noteState) {
+                .Off => return v,
+                else => {},
+            }
+        }
+        return null;
+    }
     pub fn noteOn(self: *Synth, note: u8) void {
-        const idx = self.next_idx;
-        self.next_idx = (self.next_idx + 1) % self.voices.len;
-
-        self.voices[idx].setNoteOn(note);
+        const freeVoice = findFreeVoice(self);
+        if (freeVoice) |v| {
+            v.setNoteOn(note);
+        } else {
+            const idx = self.next_idx;
+            self.next_idx = (self.next_idx + 1) % self.voices.len;
+            self.voices[idx].setNoteOn(note);
+        }
     }
     pub fn noteOff(self: *Synth, note: u8) void {
         // TODO weird logic here with repeat notes in Voices
