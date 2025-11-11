@@ -236,3 +236,75 @@ pub const Gate = struct {
         return .{ .ptr = self, .v = &self.vt };
     }
 };
+
+pub const Adsr = struct {
+    input: Node,
+    attack: f32,
+    decay: f32,
+    sustain: f32,
+    release: f32,
+    state: State = .Idle,
+
+    const State = enum { Idle, Attack, Decay, Sustain, Release };
+
+    pub fn init(input: Node, attack: f32, decay: f32, sustain: f32, release: f32) Adsr {
+        return .{
+            .input = input,
+            .attack = attack,
+            .decay = decay,
+            .sustain = sustain,
+            .release = release,
+        };
+    }
+
+    pub fn asNode(self: *Adsr) Node {
+        return .{ .ptr = self, .v = &self.vt };
+    }
+
+    pub fn noteOn(self: *Adsr) void {
+        self.state = .Attack;
+    }
+
+    pub fn noteOff(self: *Adsr) void {
+        if (self.state != .Idle) {
+            self.state = .Release;
+        }
+    }
+
+    fn _process(p: *anyopaque, ctx: *Node.Context, out: []Sample) void {
+        var self: *Adsr = @ptrCast(@alignCast(p));
+        const tmp = ctx.tmp().alloc(Sample, out.len) catch unreachable;
+        self.input.v.process(self.input.ptr, ctx, tmp);
+
+        const sr = ctx.sample_rate;
+        for (out, tmp) |*o, x| {
+            switch (self.state) {
+                .Idle => self.value = 0.0,
+                .Attack => {
+                    self.value += 1.0 / (self.attack * sr);
+                    if (self.value >= 1.0) {
+                        self.value = 1.0;
+                        self.state = .Decay;
+                    }
+                },
+                .Decay => {
+                    self.value -= (1.0 - self.sustain) / (self.decay * sr);
+                    if (self.value <= self.sustain) {
+                        self.value = self.sustain;
+                        self.state = .Sustain;
+                    }
+                },
+                .Sustain => {}, // hold
+                .Release => {
+                    self.value -= self.sustain / (self.release * sr);
+                    if (self.value <= 0.0) {
+                        self.value = 0.0;
+                        self.state = .Idle;
+                    }
+                },
+            }
+
+            o.* = x * self.value;
+        }
+    }
+};
