@@ -146,7 +146,6 @@ pub const Mixer = struct {
         std.mem.copyForwards(Node, m.inputs, inputs);
         return m;
     }
-
     fn _process(p: *anyopaque, ctx: *Context, out: []Sample) void {
         const self: *Mixer = @ptrCast(@alignCast(p));
         @memset(out, 0);
@@ -157,7 +156,6 @@ pub const Mixer = struct {
             for (out, tmp) |*o, x| o.* += x;
         }
     }
-
     pub fn asNode(self: *Mixer) Node {
         return .{ .ptr = self, .v = &self.vt };
     }
@@ -175,7 +173,6 @@ pub const Distortion = struct {
     pub fn init(input: Node, drive: f32, mix: f32, mode: Mode) Distortion {
         return .{ .input = input, .drive = drive, .mix = mix, .mode = mode };
     }
-
     fn shape(self: *const Distortion, x: Sample) Sample {
         var y: f32 = x * self.drive;
         switch (self.mode) {
@@ -196,7 +193,6 @@ pub const Distortion = struct {
         if (self.drive > 1.0) y /= self.drive;
         return y;
     }
-
     fn _process(p: *anyopaque, ctx: *Context, out: []Sample) void {
         var self: *Distortion = @ptrCast(@alignCast(p));
         const tmp = ctx.tmp().alloc(Sample, out.len) catch unreachable;
@@ -208,7 +204,6 @@ pub const Distortion = struct {
             o.* = x + (wet - x) * self.mix;
         }
     }
-
     pub fn asNode(self: *Distortion) Node {
         return .{ .ptr = self, .v = &self.vt };
     }
@@ -222,7 +217,6 @@ pub const Gate = struct {
     pub fn init(input: Node) Gate {
         return .{ .input = input, .open = false };
     }
-
     fn _process(p: *anyopaque, ctx: *Context, out: []Sample) void {
         var self: *Gate = @ptrCast(@alignCast(p));
         if (!self.open) {
@@ -231,63 +225,50 @@ pub const Gate = struct {
         }
         self.input.v.process(self.input.ptr, ctx, out);
     }
-
     pub fn asNode(self: *Gate) Node {
         return .{ .ptr = self, .v = &self.vt };
     }
 };
 
 pub const Adsr = struct {
-    input: Node,
-
-    // TODO use a Params here?
-    attack: f32,
-    decay: f32,
-    sustain: f32,
-    release: f32,
-
-    value: f32 = 0.0,
-    state: State = .Idle,
-
-    vt: VTable = .{ .process = Adsr._process },
-
-    const State = enum { Idle, Attack, Decay, Sustain, Release };
     pub const Params = struct {
         attack: f32,
         decay: f32,
         sustain: f32,
         release: f32,
     };
+    const State = enum { Idle, Attack, Decay, Sustain, Release };
+
+    input: Node,
+    params: Params,
+    value: f32 = 0.0,
+    state: State = .Idle,
+    vt: VTable = .{ .process = Adsr._process },
 
     pub fn init(input: Node, params: Params) Adsr {
         return .{
             .input = input,
-            .attack = params.attack,
-            .decay = params.decay,
-            .sustain = params.sustain,
-            .release = params.release,
+            .params = params,
         };
     }
-
     pub fn asNode(self: *Adsr) Node {
         return .{ .ptr = self, .v = &self.vt };
     }
-
     pub fn noteOn(self: *Adsr) void {
         self.state = .Attack;
     }
-
     pub fn noteOff(self: *Adsr) void {
         if (self.state != .Idle) {
             self.state = .Release;
         }
     }
-
     fn _process(p: *anyopaque, ctx: *Context, out: []Sample) void {
         var self: *Adsr = @ptrCast(@alignCast(p));
 
+        // short circuit dfs if idle
         if (self.state == .Idle) {
             @memset(out, 0);
+            return;
         }
 
         const tmp = ctx.tmp().alloc(Sample, out.len) catch unreachable;
@@ -298,29 +279,28 @@ pub const Adsr = struct {
             switch (self.state) {
                 .Idle => self.value = 0.0,
                 .Attack => {
-                    self.value += 1.0 / (self.attack * sr);
+                    self.value += 1.0 / (self.params.attack * sr);
                     if (self.value >= 1.0) {
                         self.value = 1.0;
                         self.state = .Decay;
                     }
                 },
                 .Decay => {
-                    self.value -= (1.0 - self.sustain) / (self.decay * sr);
-                    if (self.value <= self.sustain) {
-                        self.value = self.sustain;
+                    self.value -= (1.0 - self.params.sustain) / (self.params.decay * sr);
+                    if (self.value <= self.params.sustain) {
+                        self.value = self.params.sustain;
                         self.state = .Sustain;
                     }
                 },
                 .Sustain => {}, // hold
                 .Release => {
-                    self.value -= self.sustain / (self.release * sr);
+                    self.value -= self.params.sustain / (self.params.release * sr);
                     if (self.value <= 0.0) {
                         self.value = 0.0;
                         self.state = .Idle;
                     }
                 },
             }
-
             o.* = x * self.value;
         }
     }
