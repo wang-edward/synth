@@ -239,21 +239,33 @@ pub const Gate = struct {
 
 pub const Adsr = struct {
     input: Node,
+
+    // TODO use a Params here?
     attack: f32,
     decay: f32,
     sustain: f32,
     release: f32,
+
+    value: f32 = 0.0,
     state: State = .Idle,
 
-    const State = enum { Idle, Attack, Decay, Sustain, Release };
+    vt: VTable = .{ .process = Adsr._process },
 
-    pub fn init(input: Node, attack: f32, decay: f32, sustain: f32, release: f32) Adsr {
+    const State = enum { Idle, Attack, Decay, Sustain, Release };
+    pub const Params = struct {
+        attack: f32,
+        decay: f32,
+        sustain: f32,
+        release: f32,
+    };
+
+    pub fn init(input: Node, params: Params) Adsr {
         return .{
             .input = input,
-            .attack = attack,
-            .decay = decay,
-            .sustain = sustain,
-            .release = release,
+            .attack = params.attack,
+            .decay = params.decay,
+            .sustain = params.sustain,
+            .release = params.release,
         };
     }
 
@@ -271,8 +283,13 @@ pub const Adsr = struct {
         }
     }
 
-    fn _process(p: *anyopaque, ctx: *Node.Context, out: []Sample) void {
+    fn _process(p: *anyopaque, ctx: *Context, out: []Sample) void {
         var self: *Adsr = @ptrCast(@alignCast(p));
+
+        if (self.state == .Idle) {
+            @memset(out, 0);
+        }
+
         const tmp = ctx.tmp().alloc(Sample, out.len) catch unreachable;
         self.input.v.process(self.input.ptr, ctx, tmp);
 
