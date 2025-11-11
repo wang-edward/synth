@@ -15,7 +15,10 @@ const Voice = struct {
     lpf: audio.Lpf,
     adsr: audio.Adsr,
 
-    noteState: NoteState = .Off, // TODO is notestate necessary if we have adsr?
+    // TODO is notestate necessary if we have adsr?
+    // technically adsr.state == .Idle has the same meaning
+    // but then the caller has to reach deep into Voice
+    noteState: NoteState = .Off,
 
     pub fn init(alloc: std.mem.Allocator, freq: f32) !*Voice {
         const v = try alloc.create(Voice);
