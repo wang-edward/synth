@@ -13,9 +13,9 @@ const Voice = struct {
     // noise: audio.Noise, // TODO
     mixer: *audio.Mixer,
     lpf: audio.Lpf,
-    gate: audio.Gate,
+    adsr: audio.Adsr,
 
-    noteState: NoteState = .Off,
+    noteState: NoteState = .Off, // TODO is notestate necessary if we have adsr?
 
     pub fn init(alloc: std.mem.Allocator, freq: f32) !*Voice {
         const v = try alloc.create(Voice);
@@ -26,7 +26,7 @@ const Voice = struct {
             v.pwm.asNode(), v.saw.asNode(), v.sub.asNode(),
         });
         v.lpf = audio.Lpf.init(v.mixer.asNode(), 1.0, 0.5, 5000.0);
-        v.gate = audio.Gate.init(v.lpf.asNode());
+        v.adsr = audio.Adsr.init(v.lpf.asNode(), .{ .attack = 0.01, .decay = 0.1, .sustain = 0.8, .release = 0.2 });
         v.noteState = .Off;
         return v;
     }
@@ -36,7 +36,7 @@ const Voice = struct {
         alloc.destroy(self);
     }
     pub fn asNode(self: *Voice) audio.Node {
-        return self.gate.asNode();
+        return self.adsr.asNode();
     }
     pub fn setNoteOn(self: *Voice, note: u8) void {
         self.noteState = .{ .On = note };
@@ -44,13 +44,13 @@ const Voice = struct {
         self.pwm.freq = freq;
         self.saw.freq = freq;
         self.sub.freq = freq;
-        self.gate.open = true;
+        self.adsr.noteOn();
     }
     pub fn setNoteOff(self: *Voice, note: u8) void {
         switch (self.noteState) {
             .On => |on| if (on == note) {
                 self.noteState = .Off;
-                self.gate.open = false;
+                self.adsr.noteOff();
             },
             else => {},
         }
