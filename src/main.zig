@@ -208,26 +208,29 @@ pub fn main() !void {
     paramsPublish(params);
 
     var offset: i8 = 0;
-    var key_state = std.AutoHashMap(rl.KeyboardKey, bool).init(A);
+    var key_state = std.AutoHashMap(rl.KeyboardKey, ?u8).init(A);
     defer key_state.deinit();
-    for (note_keys) |k| try key_state.put(k, false);
+    for (note_keys) |k| try key_state.put(k, null);
 
     while (!rl.windowShouldClose()) {
         for (note_keys) |key| {
             const down = rl.isKeyDown(key);
-            const prev = key_state.get(key).?;
+            const active_note = key_state.get(key).?;
 
-            if (down and !prev) {
-                // key pressed
-                if (keyToMidi(key)) |note| leSynth.noteOn(@intCast(@as(i16, note) + @as(i16, offset)));
-                std.debug.print("key pressed {}\n", .{key});
-            } else if (!down and prev) {
-                // key released
-                if (keyToMidi(key)) |note| leSynth.noteOff(@intCast(@as(i16, note) + @as(i16, offset)));
+            if (down and active_note == null) {
+                if (keyToMidi(key)) |base| {
+                    const note: u8 = @intCast(@as(i16, base) + @as(i16, offset));
+                    leSynth.noteOn(note);
+                    try key_state.put(key, note);
+
+                    std.debug.print("key pressed {}\n", .{key});
+                }
+            } else if (!down and active_note != null) {
+                leSynth.noteOff(active_note.?);
+                try key_state.put(key, null);
+
                 std.debug.print("key released {}\n", .{key});
             }
-
-            try key_state.put(key, down);
         }
 
         if (rl.isKeyPressed(.up)) params.cutoff *= 1.1;
