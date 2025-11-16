@@ -2,7 +2,7 @@ const std = @import("std");
 const rl = @import("raylib");
 const c = @cImport(@cInclude("soundio/soundio.h"));
 const audio = @import("audio.zig");
-const synth = @import("synth.zig");
+const uni = @import("uni.zig");
 
 const SharedParams = struct {
     drive: f32 = 1.0,
@@ -35,7 +35,7 @@ var scratch_fba = std.heap.FixedBufferAllocator.init(&scratch_mem);
 var context: audio.Context = undefined;
 
 // graph objects
-var leSynth: *synth.Synth = undefined;
+var leSynth: *uni.Uni = undefined;
 var root: audio.Node = undefined;
 
 // libsoundio state (used only on audio thread)
@@ -114,7 +114,7 @@ fn underflow_callback(_: ?[*]c.SoundIoOutStream) callconv(.c) void {
 fn audioThreadMain() !void {
     // Build graph heap storage (Mixer inputs array)
 
-    leSynth = try synth.Synth.init(A, 4);
+    leSynth = try uni.Uni.init(A, 4);
     defer leSynth.deinit(A);
     root = leSynth.asNode();
 
