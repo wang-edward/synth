@@ -63,14 +63,14 @@ const Voice = struct {
     }
 };
 
-pub const Synth = struct {
+pub const Uni = struct {
     const SYNTH_TUNING: f32 = 440.0;
     voices: []*Voice,
     mixer: *audio.Mixer,
     next_idx: usize = 0,
 
-    pub fn init(alloc: std.mem.Allocator, count: usize) !*Synth {
-        const s = try alloc.create(Synth);
+    pub fn init(alloc: std.mem.Allocator, count: usize) !*Uni {
+        const s = try alloc.create(Uni);
         s.voices = try alloc.alloc(*Voice, count);
         for (s.voices) |*v| v.* = try Voice.init(alloc, 0.0);
 
@@ -85,17 +85,17 @@ pub const Synth = struct {
 
         return s;
     }
-    pub fn deinit(self: *Synth, alloc: std.mem.Allocator) void {
+    pub fn deinit(self: *Uni, alloc: std.mem.Allocator) void {
         for (self.voices) |v| v.deinit(alloc);
         alloc.free(self.mixer.inputs);
         alloc.destroy(self.mixer);
         alloc.free(self.voices);
         alloc.destroy(self);
     }
-    pub fn asNode(self: *Synth) audio.Node {
+    pub fn asNode(self: *Uni) audio.Node {
         return self.mixer.asNode();
     }
-    fn findFreeVoice(self: *Synth) ?*Voice {
+    fn findFreeVoice(self: *Uni) ?*Voice {
         for (self.voices) |v| {
             switch (v.noteState) {
                 .Off => return v,
@@ -104,7 +104,7 @@ pub const Synth = struct {
         }
         return null;
     }
-    pub fn noteOn(self: *Synth, note: u8) void {
+    pub fn noteOn(self: *Uni, note: u8) void {
         const freeVoice = findFreeVoice(self);
         if (freeVoice) |v| {
             v.setNoteOn(note);
@@ -114,18 +114,18 @@ pub const Synth = struct {
             self.voices[idx].setNoteOn(note);
         }
     }
-    pub fn noteOff(self: *Synth, note: u8) void {
+    pub fn noteOff(self: *Uni, note: u8) void {
         // TODO weird logic here with repeat notes in Voices
         // not sure what to do in this case yet
         for (self.voices) |v| v.setNoteOff(note);
         // TODO raise warning if note not found?
     }
-    pub fn setLpfCutoff(self: *Synth, cutoff: f32) void {
+    pub fn setLpfCutoff(self: *Uni, cutoff: f32) void {
         for (self.voices) |v| v.setLpfCutoff(cutoff);
     }
 };
 
 fn noteToFreq(note: u8) f32 {
     const semitone_offset = @as(f32, @floatFromInt(@as(i16, @intCast(note)) - 69));
-    return Synth.SYNTH_TUNING * std.math.exp2(semitone_offset / 12.0);
+    return Uni.SYNTH_TUNING * std.math.exp2(semitone_offset / 12.0);
 }
