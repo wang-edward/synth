@@ -1,6 +1,10 @@
 const Queue = @import("queue").Queue;
 const std = @import("std");
 
+test {
+    std.testing.refAllDecls(@This());
+}
+
 test "basic push/pop" {
     var q: Queue(u32, 4) = .{};
 
@@ -52,14 +56,14 @@ test "stress single-thread" {
     }
 }
 
-fn runProducer(q: *Queue(u32, 256), COUNT: usize) void {
+fn runProducer(q: *Queue(u32, 4), COUNT: usize) void {
     var i: u32 = 0;
     while (i < COUNT) : (i += 1) {
         while (!q.push(i)) {}
     }
 }
 
-fn runConsumer(q: *Queue(u32, 256), COUNT: usize) void {
+fn runConsumer(q: *Queue(u32, 4), COUNT: usize) void {
     var expected: u32 = 0;
     while (expected < COUNT) {
         if (q.pop()) |val| {
@@ -70,8 +74,8 @@ fn runConsumer(q: *Queue(u32, 256), COUNT: usize) void {
 }
 
 test "2-thread correctness" {
-    const COUNT = 200_000;
-    var q: Queue(u32, 256) = .{};
+    const COUNT = 10_000_000;
+    var q: Queue(u32, 4) = .{};
 
     var producer = try std.Thread.spawn(.{}, runProducer, .{ &q, COUNT });
     var consumer = try std.Thread.spawn(.{}, runConsumer, .{ &q, COUNT });
@@ -83,7 +87,7 @@ test "2-thread correctness" {
 test "full/empty flip stress" {
     var q: Queue(u8, 2) = .{}; // smallest nontrivial queue
 
-    for (0..10000) |_| {
+    for (0..10_000_000) |_| {
         try std.testing.expect(q.push(1));
         try std.testing.expect(q.pop() == 1);
     }
