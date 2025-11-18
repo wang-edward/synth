@@ -85,9 +85,9 @@ test "2-thread correctness" {
 }
 
 test "full/empty flip stress" {
-    var q: SpscQueue(u8, 2) = .{}; // smallest nontrivial queue
+    var q: SpscQueue(u8, 1) = .{}; // smallest possible queue
 
-    for (0..10_000_000) |_| {
+    for (0..100_000_000) |_| {
         try std.testing.expect(q.push(1));
         try std.testing.expect(q.pop() == 1);
     }
