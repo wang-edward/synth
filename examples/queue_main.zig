@@ -5,7 +5,7 @@ const Message = struct {
     data: f32,
 };
 
-pub fn Queue(comptime T: type, comptime N: usize) type {
+pub fn SpscQueue(comptime T: type, comptime N: usize) type {
     return struct {
         const Self = @This();
         write_idx: std.atomic.Value(usize) = .init(0),
@@ -36,7 +36,7 @@ pub fn Queue(comptime T: type, comptime N: usize) type {
     };
 }
 
-var queue: Queue(Message, 2) = .{};
+var queue: SpscQueue(Message, 2) = .{};
 
 pub fn main() !void {
     const prod = try std.Thread.spawn(.{}, producer, .{});
