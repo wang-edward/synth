@@ -5,7 +5,7 @@ const Message = struct {
     data: f32,
 };
 
-pub fn Queue(comptime T: type, comptime N: usize) type {
+pub fn SpscQueue(comptime T: type, comptime N: usize) type {
     return struct {
         const Self = @This();
         const CAPACITY = N + 1;
@@ -17,7 +17,7 @@ pub fn Queue(comptime T: type, comptime N: usize) type {
             const w = self.write_idx.load(.monotonic);
             const r = self.read_idx.load(.acquire);
 
-            if ((w + 1) % CAPACITY == r) return false;
+            if ((w + 1) % CAPACITY == r) return false; // full
 
             self.buf[w] = value;
             self.write_idx.store((w + 1) % CAPACITY, .release);
