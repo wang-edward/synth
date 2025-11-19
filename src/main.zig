@@ -240,7 +240,7 @@ pub fn main() !void {
     };
 
     g_seq = try seq.Sequencer.init(A, pat[0..]);
-    var seq_ctx = audio.Context.init(A, 48_000, 360); // TODO just have 2 floats for sr and bpm?
+    var seq_ctx = audio.Context.init(A, 48_000, 480); // TODO just have 2 floats for sr and bpm?
 
     var offset: i8 = 0;
     var key_state = std.AutoHashMap(rl.KeyboardKey, ?u8).init(A);
