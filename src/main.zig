@@ -3,6 +3,9 @@ const rl = @import("raylib");
 const c = @cImport(@cInclude("soundio/soundio.h"));
 const audio = @import("audio.zig");
 const uni = @import("uni.zig");
+const seq = @import("sequencer.zig");
+const queue = @import("queue.zig");
+const synth = @import("synth.zig");
 
 const SharedParams = struct {
     drive: f32 = 1.0,
@@ -12,6 +15,9 @@ const SharedParams = struct {
 
 var g_params_slots: [2]SharedParams = .{ .{}, .{} }; // front/back
 var g_params_idx = std.atomic.Value(u8).init(0); // index of *current* (front) slot
+var g_note_queue: queue.SpscQueue(synth.NoteMsg, 16) = .{};
+var g_samples_processed: std.atomic.Value(u64) = .init(0);
+var g_seq: seq.Sequencer = undefined;
 
 inline fn paramsReadSnapshot() SharedParams {
     // Audio thread: acquire to see a consistent published slot
@@ -82,6 +88,18 @@ fn write_callback(
         must(c.soundio_outstream_begin_write(maybe_outstream, @ptrCast(&areas), &frame_count));
         if (frame_count == 0) break;
 
+        while (true) {
+            const msg = g_note_queue.pop() orelse break;
+            switch (msg) {
+                .Off => |note| {
+                    leSynth.noteOff(note);
+                },
+                .On => |note| {
+                    leSynth.noteOn(note);
+                },
+            }
+        }
+
         // Render one block (mono) from the graph
         context.beginBlock();
         const mono = context.tmp().alloc(audio.Sample, @intCast(frame_count)) catch unreachable;
@@ -100,6 +118,8 @@ fn write_callback(
                 sample_ptr.* = s;
             }
         }
+
+        _ = g_samples_processed.fetchAdd(@intCast(frame_count), .release);
 
         frames_left -= frame_count;
         must(c.soundio_outstream_end_write(maybe_outstream));
@@ -141,13 +161,14 @@ fn audioThreadMain() !void {
     out.?.*.format = c.SoundIoFormatFloat32NE;
     out.?.*.write_callback = write_callback;
     out.?.*.underflow_callback = underflow_callback;
-    // optional explicit rate
-    // out.?.*.sample_rate = 48000;
+    // TODO make sample rate setting better
+    out.?.*.sample_rate = 48_000;
     must(c.soundio_outstream_open(out.?));
 
     // Init graph context with chosen sample rate
     const sr: f32 = @floatFromInt(out.?.*.sample_rate);
-    context = audio.Context.init(scratch_fba.allocator(), sr);
+    const bpm: f32 = 120;
+    context = audio.Context.init(scratch_fba.allocator(), sr, bpm);
 
     must(c.soundio_outstream_start(out.?));
 
@@ -207,10 +228,26 @@ pub fn main() !void {
     var params = SharedParams{};
     paramsPublish(params);
 
+    const pat = [_]seq.Step{
+        .{ .Note = 60 }, // C4
+        .{ .Note = 64 }, //
+        .{ .Note = 67 }, // E4
+        .{ .Note = 71 }, //
+        .{ .Note = 72 }, // C5
+        .{ .Note = 71 }, //
+        .{ .Note = 67 }, // E4
+        .{ .Note = 64 }, //
+    };
+
+    g_seq = try seq.Sequencer.init(A, pat[0..]);
+    var seq_ctx = audio.Context.init(A, 48_000, 480); // TODO just have 2 floats for sr and bpm?
+
     var offset: i8 = 0;
     var key_state = std.AutoHashMap(rl.KeyboardKey, ?u8).init(A);
     defer key_state.deinit();
     for (note_keys) |k| try key_state.put(k, null);
+
+    var last_samples_seen: u64 = 0;
 
     while (!rl.windowShouldClose()) {
         for (note_keys) |key| {
@@ -232,6 +269,12 @@ pub fn main() !void {
                 std.debug.print("key released {}\n", .{key});
             }
         }
+
+        const total = g_samples_processed.load(.acquire);
+        if (total < last_samples_seen) unreachable;
+        const delta = total - last_samples_seen;
+        last_samples_seen = total;
+        g_seq.advance(&seq_ctx, delta, &g_note_queue);
 
         if (rl.isKeyPressed(.up)) params.cutoff *= 1.1;
         if (rl.isKeyPressed(.down)) params.cutoff *= 0.9;
