@@ -1,5 +1,12 @@
 const audio = @import("audio.zig");
 const uni = @import("uni.zig");
+const SpscQueue = @import("queue.zig").SpscQueue;
+
+pub const NoteMsg = union(enum) {
+    On: u8,
+    Off: u8,
+};
+
 pub const Synth = union(enum) {
     Uni: uni.Uni,
     pub fn noteOn(self: *@This(), note: u8) void {
@@ -18,3 +25,5 @@ pub const Synth = union(enum) {
         }
     }
 };
+
+pub const NoteQueue = SpscQueue(NoteMsg, 16);
