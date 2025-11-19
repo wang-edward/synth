@@ -29,7 +29,7 @@ const Voice = struct {
             v.pwm.asNode(), v.saw.asNode(), v.sub.asNode(),
         });
         v.lpf = audio.Lpf.init(v.mixer.asNode(), 1.0, 0.5, 5000.0);
-        v.adsr = audio.Adsr.init(v.lpf.asNode(), .{ .attack = 0.01, .decay = 0.1, .sustain = 0.8, .release = 0.2 });
+        v.adsr = audio.Adsr.init(v.lpf.asNode(), .{ .attack = 0.01, .decay = 0.1, .sustain = 0.4, .release = 0.6 });
         v.noteState = .Off;
         return v;
     }
