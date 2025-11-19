@@ -8,10 +8,11 @@ pub const Node = struct { ptr: *anyopaque, v: *const VTable };
 
 pub const Context = struct {
     sample_rate: f32,
+    bpm: f32,
     arena: std.heap.ArenaAllocator,
 
-    pub fn init(backing: std.mem.Allocator, sr: f32) Context {
-        return .{ .sample_rate = sr, .arena = std.heap.ArenaAllocator.init(backing) };
+    pub fn init(backing: std.mem.Allocator, sr: f32, bpm: f32) Context {
+        return .{ .sample_rate = sr, .bpm = bpm, .arena = std.heap.ArenaAllocator.init(backing) };
     }
     pub fn beginBlock(self: *Context) void {
         _ = self.arena.reset(.retain_capacity);
