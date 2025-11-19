@@ -28,11 +28,7 @@ pub const Sequencer = struct {
     }
 
     pub fn deinit(self: *Sequencer, alloc: std.mem.Allocator) void {
-        for (self.voices) |v| v.deinit(alloc);
-        alloc.free(self.mixer.inputs);
-        alloc.destroy(self.mixer);
-        alloc.free(self.voices);
-        alloc.destroy(self);
+        alloc.free(self.pattern);
     }
 
     // TODO is it right to pass in context here?

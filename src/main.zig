@@ -240,6 +240,7 @@ pub fn main() !void {
     };
 
     g_seq = try seq.Sequencer.init(A, pat[0..]);
+    defer g_seq.deinit(A);
     var seq_ctx = audio.Context.init(A, 48_000, 480); // TODO just have 2 floats for sr and bpm?
 
     var offset: i8 = 0;
