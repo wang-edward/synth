@@ -258,13 +258,13 @@ pub fn main() !void {
             if (down and active_note == null) {
                 if (keyToMidi(key)) |base| {
                     const note: u8 = @intCast(@as(i16, base) + @as(i16, offset));
-                    leSynth.noteOn(note);
+                    while (!g_note_queue.push(.{ .On = note })) {} // TODO remove blocking?
                     try key_state.put(key, note);
 
                     std.debug.print("key pressed {}\n", .{key});
                 }
             } else if (!down and active_note != null) {
-                leSynth.noteOff(active_note.?);
+                while (!g_note_queue.push(.{ .Off = active_note.? })) {} // TODO remove blocking?
                 try key_state.put(key, null);
 
                 std.debug.print("key released {}\n", .{key});
