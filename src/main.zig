@@ -36,7 +36,7 @@ var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 const A = gpa.allocator();
 
 // Scratch allocator for audio callback (no sys allocs in callback)
-var scratch_mem: [64 * 1024]u8 = undefined;
+var scratch_mem: [512 * 1024]u8 = undefined;
 var scratch_fba = std.heap.FixedBufferAllocator.init(&scratch_mem);
 var context: audio.Context = undefined;
 
