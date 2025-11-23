@@ -163,6 +163,7 @@ fn audioThreadMain() !void {
     out.?.*.underflow_callback = underflow_callback;
     // TODO make sample rate setting better
     out.?.*.sample_rate = 48_000;
+    out.?.*.software_latency = 0.02;
     must(c.soundio_outstream_open(out.?));
 
     // Init graph context with chosen sample rate
