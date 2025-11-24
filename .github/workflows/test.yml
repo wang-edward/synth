@@ -1,0 +1,32 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Zig 0.15.1
+        id: cache-zig
+        uses: actions/cache@v4
+        with:
+          path: zig
+          key: zig-0.15.1
+
+      - name: Install Zig 0.15.1
+        if: steps.cache-zig.outputs.cache-hit != 'true'
+        run: |
+          curl -L https://ziglang.org/download/0.15.1/zig-x86_64-linux-0.15.1.tar.xz \
+            | tar -xJ
+          mv zig-x86_64-linux-0.15.1 zig
+
+      - name: Add Zig to PATH
+        run: echo "$PWD/zig" >> $GITHUB_PATH
+
+      - name: Build
+        run: zig build
