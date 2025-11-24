@@ -11,6 +11,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install system deps for raylib
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libx11-dev \
+            libxcursor-dev \
+            libxrandr-dev \
+            libxinerama-dev \
+            libxi-dev \
+            libxext-dev \
+            libxfixes-dev \
+            libxrender-dev \
+            mesa-common-dev \
+            libgl1-mesa-dev
+
       - name: Cache Zig 0.15.1
         id: cache-zig
         uses: actions/cache@v4
