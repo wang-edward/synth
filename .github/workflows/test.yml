@@ -1,0 +1,49 @@
+name: test
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system deps for raylib
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libx11-dev \
+            libxcursor-dev \
+            libxrandr-dev \
+            libxinerama-dev \
+            libxi-dev \
+            libxext-dev \
+            libxfixes-dev \
+            libxrender-dev \
+            mesa-common-dev \
+            libgl1-mesa-dev
+
+      - name: Cache Zig 0.15.1
+        id: cache-zig
+        uses: actions/cache@v4
+        with:
+          path: zig
+          key: zig-0.15.1
+
+      - name: Install Zig 0.15.1
+        if: steps.cache-zig.outputs.cache-hit != 'true'
+        run: |
+          curl -L https://ziglang.org/download/0.15.1/zig-x86_64-linux-0.15.1.tar.xz \
+            | tar -xJ
+          mv zig-x86_64-linux-0.15.1 zig
+
+      - name: Add Zig to PATH
+        run: echo "$PWD/zig" >> $GITHUB_PATH
+
+      - name: Build
+        run: zig build
