@@ -136,7 +136,10 @@ fn audioThreadMain() !void {
 
     leSynth = try uni.Uni.init(A, 4);
     defer leSynth.deinit(A);
-    root = leSynth.asNode();
+    var delay = try audio.Delay.init(A, leSynth.asNode(), 0.5 * 48_000);
+    defer delay.deinit(A);
+
+    root = delay.asNode();
 
     // SoundIO setup
     sio = c.soundio_create();
@@ -230,6 +233,7 @@ pub fn main() !void {
     paramsPublish(params);
 
     const pat = [_]seq.Step{
+        // .Rest,
         .{ .Note = 60 }, // C4
         .{ .Note = 64 }, //
         .{ .Note = 67 }, // E4
