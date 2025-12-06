@@ -36,7 +36,7 @@ var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 const A = gpa.allocator();
 
 // Scratch allocator for audio callback (no sys allocs in callback)
-var scratch_mem: [64 * 1024]u8 = undefined;
+var scratch_mem: [512 * 1024]u8 = undefined;
 var scratch_fba = std.heap.FixedBufferAllocator.init(&scratch_mem);
 var context: audio.Context = undefined;
 
@@ -163,6 +163,7 @@ fn audioThreadMain() !void {
     out.?.*.underflow_callback = underflow_callback;
     // TODO make sample rate setting better
     out.?.*.sample_rate = 48_000;
+    out.?.*.software_latency = 0.02;
     must(c.soundio_outstream_open(out.?));
 
     // Init graph context with chosen sample rate
@@ -258,13 +259,13 @@ pub fn main() !void {
             if (down and active_note == null) {
                 if (keyToMidi(key)) |base| {
                     const note: u8 = @intCast(@as(i16, base) + @as(i16, offset));
-                    leSynth.noteOn(note);
+                    while (!g_note_queue.push(.{ .On = note })) {} // TODO remove blocking?
                     try key_state.put(key, note);
 
                     std.debug.print("key pressed {}\n", .{key});
                 }
             } else if (!down and active_note != null) {
-                leSynth.noteOff(active_note.?);
+                while (!g_note_queue.push(.{ .Off = active_note.? })) {} // TODO remove blocking?
                 try key_state.put(key, null);
 
                 std.debug.print("key released {}\n", .{key});
