@@ -233,20 +233,75 @@ pub fn main() !void {
     paramsPublish(params);
 
     const pat = [_]seq.Step{
-        // .Rest,
-        .{ .Note = 60 }, // C4
-        .{ .Note = 64 }, //
-        .{ .Note = 67 }, // E4
-        .{ .Note = 71 }, //
-        .{ .Note = 72 }, // C5
-        .{ .Note = 71 }, //
-        .{ .Note = 67 }, // E4
-        .{ .Note = 64 }, //
+        .{ .Note = 58 }, // bf3
+        .{ .Note = 39 }, // ef2
+        .{ .Note = 70 }, // bf4
+        .{ .Note = 51 }, // ef3
+        .{ .Note = 49 }, // df3
+        .{ .Note = 58 }, // bf3
+        .{ .Note = 39 }, // ef2
+        .{ .Note = 61 }, // df4
+        .{ .Note = 51 }, // ef3
+        .{ .Note = 58 }, // bf3
+        .{ .Note = 61 }, // df4
+        .{ .Note = 70 }, // bf4
+        .{ .Note = 70 }, // bf4
+        .{ .Note = 51 }, // ef3
+        .{ .Note = 51 }, // ef3
+        .{ .Note = 58 }, // bf3
+        .{ .Note = 59 }, // cf3
+        .{ .Note = 51 }, // ef3
+        .{ .Note = 71 }, // cf4
+        .{ .Note = 59 }, // cf3
+        .{ .Note = 54 }, // gf3
+        .{ .Note = 71 }, // cf4
+        .{ .Note = 59 }, // cf3
+        .{ .Note = 66 }, // gf4
+        .{ .Note = 71 }, // cf4
+        .{ .Note = 71 }, // cf4
+        .{ .Note = 66 }, // gf4
+        .{ .Note = 71 }, // cf4
+        .{ .Note = 71 }, // cf4
+        .{ .Note = 59 }, // cf3
+        .{ .Note = 51 }, // ef3
+        .{ .Note = 59 }, // cf3
+        .{ .Note = 59 }, // cf3
+        .{ .Note = 51 }, // ef3
+        .{ .Note = 71 }, // cf4
+        .{ .Note = 59 }, // cf3
+        .{ .Note = 51 }, // ef3
+        .{ .Note = 59 }, // cf3
+        .{ .Note = 56 }, // af3
+        .{ .Note = 63 }, // ef4
+        .{ .Note = 71 }, // cf4
+        .{ .Note = 59 }, // cf3
+        .{ .Note = 63 }, // ef4
+        .{ .Note = 71 }, // cf4
+        .{ .Note = 71 }, // cf4
+        .{ .Note = 56 }, // af3
+        .{ .Note = 49 }, // df3
+        .{ .Note = 59 }, // cf3
+        .{ .Note = 58 }, // bf3
+        .{ .Note = 49 }, // df3
+        .{ .Note = 70 }, // bf4
+        .{ .Note = 58 }, // bf3
+        .{ .Note = 49 }, // df3
+        .{ .Note = 58 }, // bf3
+        .{ .Note = 58 }, // bf3
+        .{ .Note = 61 }, // df4
+        .{ .Note = 49 }, // df3
+        .{ .Note = 58 }, // bf3
+        .{ .Note = 61 }, // df4
+        .{ .Note = 70 }, // bf4
+        .{ .Note = 70 }, // bf4
+        .{ .Note = 58 }, // bf3
+        .{ .Note = 54 }, // gf3
+        .{ .Note = 58 }, // bf3
     };
 
     g_seq = try seq.Sequencer.init(A, pat[0..]);
     defer g_seq.deinit(A);
-    var seq_ctx = audio.Context.init(A, 48_000, 480); // TODO just have 2 floats for sr and bpm?
+    var seq_ctx = audio.Context.init(A, 48_000, 420); // TODO just have 2 floats for sr and bpm?
 
     var offset: i8 = 0;
     var key_state = std.AutoHashMap(rl.KeyboardKey, ?u8).init(A);
