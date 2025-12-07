@@ -23,7 +23,7 @@ const Interface = struct {
         rl.setConfigFlags(.{ .window_resizable = true });
         rl.initWindow(512, 512, "raylib - Rescalable 128x128 render");
 
-        const target = rl.loadRenderTexture(WIDTH, HEIGHT);
+        const target = try rl.loadRenderTexture(WIDTH, HEIGHT);
         rl.setTargetFPS(60);
         rl.setExitKey(.null); // ESC doesn't close program
 
