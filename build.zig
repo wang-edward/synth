@@ -52,7 +52,7 @@ pub fn build(b: *std.Build) void {
     const graphics_demo = b.addExecutable(.{
         .name = "graphics",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("examples/graphics_demo.zig"),
+            .root_source_file = b.path("examples/graphics_demo/graphics_demo.zig"),
             .target = target,
             .optimize = optimize,
             .imports = &.{
