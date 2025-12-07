@@ -321,9 +321,9 @@ pub const Delay = struct {
         d.* = .{
             .input = input,
             .buffer = try a.alloc(Sample, buffer_size),
-            .delay_time = 0.3,
-            .feedback = 0.5,
-            .mix = 0.3,
+            .delay_time = 0.25,
+            .feedback = 0.3,
+            .mix = 0.2,
         };
         @memset(d.buffer, 0);
         return d;
