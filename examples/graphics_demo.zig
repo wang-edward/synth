@@ -62,8 +62,8 @@ const Interface = struct {
         const screen_width = rl.getScreenWidth();
         const screen_height = rl.getScreenHeight();
         const square_len = @min(screen_width, screen_height);
-        const pos_x: f32 = @floatFromInt((screen_width - square_len) / 2);
-        const pos_y: f32 = @floatFromInt((screen_height - square_len) / 2);
+        const pos_x: f32 = @floatFromInt(@divTrunc(screen_width - square_len, 2));
+        const pos_y: f32 = @floatFromInt(@divTrunc(screen_height - square_len, 2));
         const square_len_f: f32 = @floatFromInt(square_len);
 
         rl.endTextureMode();
