@@ -1,4 +1,4 @@
-# Video demo
+# Video demo (youtube)
 [![video demo](https://img.youtube.com/vi/XMdhAa6qCPk/0.jpg)](https://www.youtube.com/watch?v=XMdhAa6qCPk)
 
 
