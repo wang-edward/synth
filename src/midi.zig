@@ -10,7 +10,7 @@ pub const Note = struct {
     note: u8,
 };
 
-pub fn beatsToSamples(beats: f32, tempo: f32, ctx: *audio.Context) Frame {
+pub fn beatsToFrames(beats: f32, tempo: f32, ctx: *audio.Context) Frame {
     return @intFromFloat((60.0 / tempo) * ctx.sample_rate * beats);
 }
 
@@ -29,13 +29,13 @@ pub const Player = struct {
     pub fn deinit(self: *Player, alloc: std.mem.Allocator) void {
         alloc.free(self.notes);
     }
-    pub fn advance(self: *Player, samples_elapsed: u64, q: *synth.NoteQueue) void {
+    pub fn advance(self: *Player, frames_elapsed: u64, q: *synth.NoteQueue) void {
         const pre_accum = self.sample_accum;
-        const post_accum = self.sample_accum + samples_elapsed;
+        const post_accum = self.sample_accum + frames_elapsed;
         self.sample_accum = post_accum;
 
-        // std.debug.print("samples_elapsed: {}, pre_accum: {}, post_accum: {}\n", .{ samples_elapsed, pre_accum, post_accum });
-        std.debug.assert(samples_elapsed < 8192);
+        // std.debug.print("frames_elapsed: {}, pre_accum: {}, post_accum: {}\n", .{ frames_elapsed, pre_accum, post_accum });
+        std.debug.assert(frames_elapsed < 8192);
 
         for (self.notes) |n| {
             // TODO check what happens when advance() is called on the latter boundary wrt <, <=
@@ -44,7 +44,7 @@ pub const Player = struct {
                 // std.debug.print("on: {}\n", .{n});
                 while (q.push(.{ .On = n.note })) {}
             }
-            // TODO what if both start and end pass in the same samples_elapsed?
+            // TODO what if both start and end pass in the same frames_elapsed?
             // might lead to a hanging note?
             if (pre_accum <= n.end and n.end < post_accum) {
                 // std.debug.print("off: {}\n", .{n});
