@@ -1,4 +1,5 @@
 const std = @import("std");
+const audio = @import("audio.zig");
 const synth = @import("synth.zig");
 
 pub const Frame = u64;
@@ -8,6 +9,10 @@ pub const MidiNote = struct {
     end: Frame,
     note: u8,
 };
+
+pub fn beatsToSamples(beats: u64, tempo: f32, ctx: *audio.Context) Frame {
+    return tempo * 60 * ctx.sample_rate * beats;
+}
 
 pub const MidiPlayer = struct {
     notes: []MidiNote,
@@ -24,12 +29,12 @@ pub const MidiPlayer = struct {
     pub fn deinit(self: *MidiPlayer, alloc: std.mem.Allocator) void {
         alloc.free(self.notes);
     }
-    pub fn advance(self: *MidiPlayer, ctx: *audio.Context, samples_elapsed: u64, q: *synth.NoteQueue) void {
+    pub fn advance(self: *MidiPlayer, samples_elapsed: u64, q: *synth.NoteQueue) void {
         const pre_accum = self.sample_accum;
         const post_accum = self.sample_accum + samples_elapsed;
         self.sample_accum = post_accum;
 
-        for (notes) |n| {
+        for (self.notes) |n| {
             if (pre_accum <= n.start and n.start <= post_accum) {
                 q.push(.{ .On = n.note });
             }
