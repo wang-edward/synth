@@ -42,13 +42,13 @@ pub const Player = struct {
             // so what if pre_accum == n.start... is this even a problem?
             if (pre_accum <= n.start and n.start < post_accum) {
                 // std.debug.print("on: {}\n", .{n});
-                while (q.push(.{ .On = n.note })) {}
+                while (!q.push(.{ .On = n.note })) {}
             }
             // TODO what if both start and end pass in the same frames_elapsed?
             // might lead to a hanging note?
             if (pre_accum <= n.end and n.end < post_accum) {
                 // std.debug.print("off: {}\n", .{n});
-                while (q.push(.{ .Off = n.note })) {}
+                while (!q.push(.{ .Off = n.note })) {}
             }
         }
     }

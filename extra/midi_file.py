@@ -26,5 +26,5 @@ for track in mid.tracks:
 
 print(f"const tempo: f32 = {tempo};\n\nconst notes = [_]midi.Note{{")
 for start, end, note in sorted(notes):
-    print(f"    .{{ .start = midi.beatsToSamples({start:.4f}, tempo, &context), .end = midi.beatsToSamples({end:.4f}, tempo, &context), .note = {note} }},")
+    print(f"    .{{ .start = midi.beatsToFrames({start:.4f}, tempo, &context), .end = midi.beatsToFrames({end:.4f}, tempo, &context), .note = {note} }},")
 print("};")
