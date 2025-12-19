@@ -11,7 +11,7 @@ pub const Note = struct {
 };
 
 pub fn beatsToSamples(beats: f32, tempo: f32, ctx: *audio.Context) Frame {
-    return @intFromFloat((tempo / 60.0) * ctx.sample_rate * beats);
+    return @intFromFloat((60.0 / tempo) * ctx.sample_rate * beats);
 }
 
 pub const Player = struct {
