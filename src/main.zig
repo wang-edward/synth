@@ -3,9 +3,9 @@ const rl = @import("raylib");
 const c = @cImport(@cInclude("soundio/soundio.h"));
 const audio = @import("audio.zig");
 const uni = @import("uni.zig");
-const seq = @import("sequencer.zig");
 const queue = @import("queue.zig");
 const synth = @import("synth.zig");
+const midi = @import("midi.zig");
 
 const SharedParams = struct {
     drive: f32 = 1.0,
@@ -17,7 +17,7 @@ var g_params_slots: [2]SharedParams = .{ .{}, .{} }; // front/back
 var g_params_idx = std.atomic.Value(u8).init(0); // index of *current* (front) slot
 var g_note_queue: queue.SpscQueue(synth.NoteMsg, 16) = .{};
 var g_samples_processed: std.atomic.Value(u64) = .init(0);
-var g_seq: seq.Sequencer = undefined;
+var g_midi_player: midi.Player = undefined;
 
 inline fn paramsReadSnapshot() SharedParams {
     // Audio thread: acquire to see a consistent published slot
@@ -232,76 +232,21 @@ pub fn main() !void {
     var params = SharedParams{};
     paramsPublish(params);
 
-    const pat = [_]seq.Step{
-        .{ .Note = 58 }, // bf3
-        .{ .Note = 39 }, // ef2
-        .{ .Note = 70 }, // bf4
-        .{ .Note = 51 }, // ef3
-        .{ .Note = 49 }, // df3
-        .{ .Note = 58 }, // bf3
-        .{ .Note = 39 }, // ef2
-        .{ .Note = 61 }, // df4
-        .{ .Note = 51 }, // ef3
-        .{ .Note = 58 }, // bf3
-        .{ .Note = 61 }, // df4
-        .{ .Note = 70 }, // bf4
-        .{ .Note = 70 }, // bf4
-        .{ .Note = 51 }, // ef3
-        .{ .Note = 51 }, // ef3
-        .{ .Note = 58 }, // bf3
-        .{ .Note = 59 }, // cf3
-        .{ .Note = 51 }, // ef3
-        .{ .Note = 71 }, // cf4
-        .{ .Note = 59 }, // cf3
-        .{ .Note = 54 }, // gf3
-        .{ .Note = 71 }, // cf4
-        .{ .Note = 59 }, // cf3
-        .{ .Note = 66 }, // gf4
-        .{ .Note = 71 }, // cf4
-        .{ .Note = 71 }, // cf4
-        .{ .Note = 66 }, // gf4
-        .{ .Note = 71 }, // cf4
-        .{ .Note = 71 }, // cf4
-        .{ .Note = 59 }, // cf3
-        .{ .Note = 51 }, // ef3
-        .{ .Note = 59 }, // cf3
-        .{ .Note = 59 }, // cf3
-        .{ .Note = 51 }, // ef3
-        .{ .Note = 71 }, // cf4
-        .{ .Note = 59 }, // cf3
-        .{ .Note = 51 }, // ef3
-        .{ .Note = 59 }, // cf3
-        .{ .Note = 56 }, // af3
-        .{ .Note = 63 }, // ef4
-        .{ .Note = 71 }, // cf4
-        .{ .Note = 59 }, // cf3
-        .{ .Note = 63 }, // ef4
-        .{ .Note = 71 }, // cf4
-        .{ .Note = 71 }, // cf4
-        .{ .Note = 56 }, // af3
-        .{ .Note = 49 }, // df3
-        .{ .Note = 59 }, // cf3
-        .{ .Note = 58 }, // bf3
-        .{ .Note = 49 }, // df3
-        .{ .Note = 70 }, // bf4
-        .{ .Note = 58 }, // bf3
-        .{ .Note = 49 }, // df3
-        .{ .Note = 58 }, // bf3
-        .{ .Note = 58 }, // bf3
-        .{ .Note = 61 }, // df4
-        .{ .Note = 49 }, // df3
-        .{ .Note = 58 }, // bf3
-        .{ .Note = 61 }, // df4
-        .{ .Note = 70 }, // bf4
-        .{ .Note = 70 }, // bf4
-        .{ .Note = 58 }, // bf3
-        .{ .Note = 54 }, // gf3
-        .{ .Note = 58 }, // bf3
-    };
+    const tempo: f32 = 120;
 
-    g_seq = try seq.Sequencer.init(A, pat[0..]);
-    defer g_seq.deinit(A);
-    var seq_ctx = audio.Context.init(A, 48_000, 420); // TODO just have 2 floats for sr and bpm?
+    const notes = [_]midi.Note{
+        .{
+            .start = 0,
+            .end = midi.beatsToSamples(4, tempo, &context),
+            .note = 64,
+        },
+        .{
+            .start = midi.beatsToSamples(6, tempo, &context),
+            .end = midi.beatsToSamples(10, tempo, &context),
+            .note = 80,
+        },
+    };
+    g_midi_player = try midi.Player.init(A, &notes);
 
     var offset: i8 = 0;
     var key_state = std.AutoHashMap(rl.KeyboardKey, ?u8).init(A);
@@ -335,7 +280,7 @@ pub fn main() !void {
         if (total < last_samples_seen) unreachable;
         const delta = total - last_samples_seen;
         last_samples_seen = total;
-        g_seq.advance(&seq_ctx, delta, &g_note_queue);
+        g_midi_player.advance(delta, &g_note_queue);
 
         if (rl.isKeyPressed(.up)) params.cutoff *= 1.1;
         if (rl.isKeyPressed(.down)) params.cutoff *= 0.9;
