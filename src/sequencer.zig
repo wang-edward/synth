@@ -36,11 +36,11 @@ pub const Sequencer = struct {
     // right now only sample_rate and bpm are being read so its chill
     // but its possible to make mistakes later?
     // and like do i need to break the clean-ness just to get 2 floats in
-    pub fn advance(self: *Sequencer, ctx: *audio.Context, samples_elapsed: u64, q: *synth.NoteQueue) void {
-        // update state after samples_elapsed samples
+    pub fn advance(self: *Sequencer, ctx: *audio.Context, frames_elapsed: u64, q: *synth.NoteQueue) void {
+        // update state after frames_elapsed samples
         const samples_per_beat: u64 = @intFromFloat((60.0 / ctx.bpm) * ctx.sample_rate);
 
-        self.sample_accum += samples_elapsed;
+        self.sample_accum += frames_elapsed;
 
         if (self.sample_accum >= samples_per_beat) { // TODO >?
             self.sample_accum %= samples_per_beat;
