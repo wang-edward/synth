@@ -45,10 +45,10 @@ const Voice = struct {
         self.noteState = .{ .On = note };
         const freq = noteToFreq(note);
         self.pwm.resetPhase();
-        self.pwm.freq = freq;
         self.saw.resetPhase();
-        self.saw.freq = freq;
         self.sub.resetPhase();
+        self.pwm.freq = freq;
+        self.saw.freq = freq;
         self.sub.freq = freq;
         self.adsr.noteOn();
     }
