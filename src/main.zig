@@ -237,12 +237,12 @@ pub fn main() !void {
     const notes = [_]midi.Note{
         .{
             .start = 0,
-            .end = midi.beatsToSamples(4, tempo, &context),
+            .end = midi.beatsToSamples(1, tempo, &context),
             .note = 64,
         },
         .{
-            .start = midi.beatsToSamples(6, tempo, &context),
-            .end = midi.beatsToSamples(10, tempo, &context),
+            .start = midi.beatsToSamples(2, tempo, &context),
+            .end = midi.beatsToSamples(4, tempo, &context),
             .note = 80,
         },
     };
