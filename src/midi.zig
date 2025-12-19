@@ -10,8 +10,8 @@ pub const Note = struct {
     note: u8,
 };
 
-pub fn beatsToSamples(beats: u64, tempo: f32, ctx: *audio.Context) Frame {
-    return tempo * 60 * ctx.sample_rate * beats;
+pub fn beatsToSamples(beats: f32, tempo: f32, ctx: *audio.Context) Frame {
+    return @intFromFloat((tempo / 60.0) * ctx.sample_rate * beats);
 }
 
 pub const Player = struct {
@@ -36,12 +36,12 @@ pub const Player = struct {
 
         for (self.notes) |n| {
             if (pre_accum <= n.start and n.start <= post_accum) {
-                q.push(.{ .On = n.note });
+                while (q.push(.{ .On = n.note })) {}
             }
             // TODO what if both start and end pass in the same samples_elapsed?
             // might lead to a hanging note?
             if (pre_accum <= n.end and n.end <= post_accum) {
-                q.push(.{ .Off = n.note });
+                while (q.push(.{ .Off = n.note })) {}
             }
         }
     }
