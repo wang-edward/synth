@@ -1,4 +1,9 @@
+# leSynth
 <img width="832" height="620" alt="Screenshot 2025-11-04 at 4 54 18 AM" src="https://github.com/user-attachments/assets/a2075523-4ac7-4ec0-a94e-e4fba51f9a51" />
+
+## Video demo
+[![video demo](https://img.youtube.com/vi/XMdhAa6qCPk/0.jpg)](https://www.youtube.com/watch?v=XMdhAa6qCPk)
+
 
 how to get zig 0.15.1
 ```
