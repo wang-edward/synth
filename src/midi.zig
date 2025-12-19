@@ -34,13 +34,20 @@ pub const Player = struct {
         const post_accum = self.sample_accum + samples_elapsed;
         self.sample_accum = post_accum;
 
+        // std.debug.print("samples_elapsed: {}, pre_accum: {}, post_accum: {}\n", .{ samples_elapsed, pre_accum, post_accum });
+        std.debug.assert(samples_elapsed < 8192);
+
         for (self.notes) |n| {
-            if (pre_accum <= n.start and n.start <= post_accum) {
+            // TODO check what happens when advance() is called on the latter boundary wrt <, <=
+            // so what if pre_accum == n.start... is this even a problem?
+            if (pre_accum <= n.start and n.start < post_accum) {
+                // std.debug.print("on: {}\n", .{n});
                 while (q.push(.{ .On = n.note })) {}
             }
             // TODO what if both start and end pass in the same samples_elapsed?
             // might lead to a hanging note?
-            if (pre_accum <= n.end and n.end <= post_accum) {
+            if (pre_accum <= n.end and n.end < post_accum) {
+                // std.debug.print("off: {}\n", .{n});
                 while (q.push(.{ .Off = n.note })) {}
             }
         }
