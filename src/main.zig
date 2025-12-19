@@ -15,7 +15,7 @@ const SharedParams = struct {
 
 var g_params_slots: [2]SharedParams = .{ .{}, .{} }; // front/back
 var g_params_idx = std.atomic.Value(u8).init(0); // index of *current* (front) slot
-var g_note_queue: queue.SpscQueue(synth.NoteMsg, 16) = .{};
+var g_note_queue: synth.NoteQueue = .{};
 var g_samples_processed: std.atomic.Value(u64) = .init(0);
 var g_midi_player: midi.Player = undefined;
 
@@ -136,10 +136,8 @@ fn audioThreadMain() !void {
 
     leSynth = try uni.Uni.init(A, 4);
     defer leSynth.deinit(A);
-    var delay = try audio.Delay.init(A, leSynth.asNode(), 0.5 * 48_000);
-    defer delay.deinit(A);
 
-    root = delay.asNode();
+    root = leSynth.asNode();
 
     // SoundIO setup
     sio = c.soundio_create();
@@ -235,17 +233,22 @@ pub fn main() !void {
     const tempo: f32 = 120;
 
     const notes = [_]midi.Note{
-        .{
-            .start = 0,
-            .end = midi.beatsToSamples(1, tempo, &context),
-            .note = 64,
-        },
-        .{
-            .start = midi.beatsToSamples(2, tempo, &context),
-            .end = midi.beatsToSamples(4, tempo, &context),
-            .note = 80,
-        },
+        .{ .start = midi.beatsToSamples(0.0, tempo, &context), .end = midi.beatsToSamples(0.9, tempo, &context), .note = 60 },
+        .{ .start = midi.beatsToSamples(1.0, tempo, &context), .end = midi.beatsToSamples(1.9, tempo, &context), .note = 60 },
+        .{ .start = midi.beatsToSamples(2.0, tempo, &context), .end = midi.beatsToSamples(2.9, tempo, &context), .note = 67 },
+        .{ .start = midi.beatsToSamples(3.0, tempo, &context), .end = midi.beatsToSamples(3.9, tempo, &context), .note = 67 },
+        .{ .start = midi.beatsToSamples(4.0, tempo, &context), .end = midi.beatsToSamples(4.9, tempo, &context), .note = 69 },
+        .{ .start = midi.beatsToSamples(5.0, tempo, &context), .end = midi.beatsToSamples(5.9, tempo, &context), .note = 69 },
+        .{ .start = midi.beatsToSamples(6.0, tempo, &context), .end = midi.beatsToSamples(7.9, tempo, &context), .note = 67 },
+        .{ .start = midi.beatsToSamples(8.0, tempo, &context), .end = midi.beatsToSamples(8.9, tempo, &context), .note = 65 },
+        .{ .start = midi.beatsToSamples(9.0, tempo, &context), .end = midi.beatsToSamples(9.9, tempo, &context), .note = 65 },
+        .{ .start = midi.beatsToSamples(10.0, tempo, &context), .end = midi.beatsToSamples(10.9, tempo, &context), .note = 64 },
+        .{ .start = midi.beatsToSamples(11.0, tempo, &context), .end = midi.beatsToSamples(11.9, tempo, &context), .note = 64 },
+        .{ .start = midi.beatsToSamples(12.0, tempo, &context), .end = midi.beatsToSamples(12.9, tempo, &context), .note = 62 },
+        .{ .start = midi.beatsToSamples(13.0, tempo, &context), .end = midi.beatsToSamples(13.9, tempo, &context), .note = 62 },
+        .{ .start = midi.beatsToSamples(14.0, tempo, &context), .end = midi.beatsToSamples(15.9, tempo, &context), .note = 60 },
     };
+
     g_midi_player = try midi.Player.init(A, &notes);
     defer g_midi_player.deinit(A);
 
