@@ -247,6 +247,7 @@ pub fn main() !void {
         },
     };
     g_midi_player = try midi.Player.init(A, &notes);
+    defer g_midi_player.deinit(A);
 
     var offset: i8 = 0;
     var key_state = std.AutoHashMap(rl.KeyboardKey, ?u8).init(A);
