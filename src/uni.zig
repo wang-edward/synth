@@ -44,8 +44,11 @@ const Voice = struct {
     pub fn setNoteOn(self: *Voice, note: u8) void {
         self.noteState = .{ .On = note };
         const freq = noteToFreq(note);
+        self.pwm.resetPhase();
         self.pwm.freq = freq;
+        self.saw.resetPhase();
         self.saw.freq = freq;
+        self.sub.resetPhase();
         self.sub.freq = freq;
         self.adsr.noteOn();
     }

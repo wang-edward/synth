@@ -43,7 +43,7 @@ pub const Osc = struct {
         const base_inc = self.freq / ctx.sample_rate;
         const inc = switch (self.kind) {
             .sub => |sub| base_inc * std.math.exp2(sub.offset / 12.0),
-            else => self.freq / ctx.sample_rate,
+            else => base_inc,
         };
         for (0..out.len) |i| {
             const sample: Sample = switch (self.kind) {
@@ -54,11 +54,14 @@ pub const Osc = struct {
             };
             out[i] = @floatCast(sample);
             self.phase += inc;
-            if (self.phase >= 1.0) self.phase -= 1.0;
+            while (self.phase >= 1.0) self.phase -= 1.0;
         }
     }
     pub fn asNode(self: *Osc) Node {
         return .{ .ptr = self, .v = &self.vt };
+    }
+    pub fn resetPhase(self: *Osc) void {
+        self.phase = 0.0;
     }
 };
 
