@@ -3,9 +3,9 @@ const rl = @import("raylib");
 const c = @cImport(@cInclude("soundio/soundio.h"));
 const audio = @import("audio.zig");
 const uni = @import("uni.zig");
-const seq = @import("sequencer.zig");
 const queue = @import("queue.zig");
 const synth = @import("synth.zig");
+const midi = @import("midi.zig");
 
 const SharedParams = struct {
     drive: f32 = 1.0,
@@ -15,9 +15,9 @@ const SharedParams = struct {
 
 var g_params_slots: [2]SharedParams = .{ .{}, .{} }; // front/back
 var g_params_idx = std.atomic.Value(u8).init(0); // index of *current* (front) slot
-var g_note_queue: queue.SpscQueue(synth.NoteMsg, 16) = .{};
+var g_note_queue: synth.NoteQueue = .{};
 var g_samples_processed: std.atomic.Value(u64) = .init(0);
-var g_seq: seq.Sequencer = undefined;
+var g_midi_player: midi.Player = undefined;
 
 inline fn paramsReadSnapshot() SharedParams {
     // Audio thread: acquire to see a consistent published slot
@@ -136,10 +136,8 @@ fn audioThreadMain() !void {
 
     leSynth = try uni.Uni.init(A, 4);
     defer leSynth.deinit(A);
-    var delay = try audio.Delay.init(A, leSynth.asNode(), 0.5 * 48_000);
-    defer delay.deinit(A);
 
-    root = delay.asNode();
+    root = leSynth.asNode();
 
     // SoundIO setup
     sio = c.soundio_create();
@@ -232,76 +230,27 @@ pub fn main() !void {
     var params = SharedParams{};
     paramsPublish(params);
 
-    const pat = [_]seq.Step{
-        .{ .Note = 58 }, // bf3
-        .{ .Note = 39 }, // ef2
-        .{ .Note = 70 }, // bf4
-        .{ .Note = 51 }, // ef3
-        .{ .Note = 49 }, // df3
-        .{ .Note = 58 }, // bf3
-        .{ .Note = 39 }, // ef2
-        .{ .Note = 61 }, // df4
-        .{ .Note = 51 }, // ef3
-        .{ .Note = 58 }, // bf3
-        .{ .Note = 61 }, // df4
-        .{ .Note = 70 }, // bf4
-        .{ .Note = 70 }, // bf4
-        .{ .Note = 51 }, // ef3
-        .{ .Note = 51 }, // ef3
-        .{ .Note = 58 }, // bf3
-        .{ .Note = 59 }, // cf3
-        .{ .Note = 51 }, // ef3
-        .{ .Note = 71 }, // cf4
-        .{ .Note = 59 }, // cf3
-        .{ .Note = 54 }, // gf3
-        .{ .Note = 71 }, // cf4
-        .{ .Note = 59 }, // cf3
-        .{ .Note = 66 }, // gf4
-        .{ .Note = 71 }, // cf4
-        .{ .Note = 71 }, // cf4
-        .{ .Note = 66 }, // gf4
-        .{ .Note = 71 }, // cf4
-        .{ .Note = 71 }, // cf4
-        .{ .Note = 59 }, // cf3
-        .{ .Note = 51 }, // ef3
-        .{ .Note = 59 }, // cf3
-        .{ .Note = 59 }, // cf3
-        .{ .Note = 51 }, // ef3
-        .{ .Note = 71 }, // cf4
-        .{ .Note = 59 }, // cf3
-        .{ .Note = 51 }, // ef3
-        .{ .Note = 59 }, // cf3
-        .{ .Note = 56 }, // af3
-        .{ .Note = 63 }, // ef4
-        .{ .Note = 71 }, // cf4
-        .{ .Note = 59 }, // cf3
-        .{ .Note = 63 }, // ef4
-        .{ .Note = 71 }, // cf4
-        .{ .Note = 71 }, // cf4
-        .{ .Note = 56 }, // af3
-        .{ .Note = 49 }, // df3
-        .{ .Note = 59 }, // cf3
-        .{ .Note = 58 }, // bf3
-        .{ .Note = 49 }, // df3
-        .{ .Note = 70 }, // bf4
-        .{ .Note = 58 }, // bf3
-        .{ .Note = 49 }, // df3
-        .{ .Note = 58 }, // bf3
-        .{ .Note = 58 }, // bf3
-        .{ .Note = 61 }, // df4
-        .{ .Note = 49 }, // df3
-        .{ .Note = 58 }, // bf3
-        .{ .Note = 61 }, // df4
-        .{ .Note = 70 }, // bf4
-        .{ .Note = 70 }, // bf4
-        .{ .Note = 58 }, // bf3
-        .{ .Note = 54 }, // gf3
-        .{ .Note = 58 }, // bf3
+    const tempo: f32 = 120;
+
+    const notes = [_]midi.Note{
+        .{ .start = midi.beatsToSamples(0.0, tempo, &context), .end = midi.beatsToSamples(0.9, tempo, &context), .note = 60 },
+        .{ .start = midi.beatsToSamples(1.0, tempo, &context), .end = midi.beatsToSamples(1.9, tempo, &context), .note = 60 },
+        .{ .start = midi.beatsToSamples(2.0, tempo, &context), .end = midi.beatsToSamples(2.9, tempo, &context), .note = 67 },
+        .{ .start = midi.beatsToSamples(3.0, tempo, &context), .end = midi.beatsToSamples(3.9, tempo, &context), .note = 67 },
+        .{ .start = midi.beatsToSamples(4.0, tempo, &context), .end = midi.beatsToSamples(4.9, tempo, &context), .note = 69 },
+        .{ .start = midi.beatsToSamples(5.0, tempo, &context), .end = midi.beatsToSamples(5.9, tempo, &context), .note = 69 },
+        .{ .start = midi.beatsToSamples(6.0, tempo, &context), .end = midi.beatsToSamples(7.9, tempo, &context), .note = 67 },
+        .{ .start = midi.beatsToSamples(8.0, tempo, &context), .end = midi.beatsToSamples(8.9, tempo, &context), .note = 65 },
+        .{ .start = midi.beatsToSamples(9.0, tempo, &context), .end = midi.beatsToSamples(9.9, tempo, &context), .note = 65 },
+        .{ .start = midi.beatsToSamples(10.0, tempo, &context), .end = midi.beatsToSamples(10.9, tempo, &context), .note = 64 },
+        .{ .start = midi.beatsToSamples(11.0, tempo, &context), .end = midi.beatsToSamples(11.9, tempo, &context), .note = 64 },
+        .{ .start = midi.beatsToSamples(12.0, tempo, &context), .end = midi.beatsToSamples(12.9, tempo, &context), .note = 62 },
+        .{ .start = midi.beatsToSamples(13.0, tempo, &context), .end = midi.beatsToSamples(13.9, tempo, &context), .note = 62 },
+        .{ .start = midi.beatsToSamples(14.0, tempo, &context), .end = midi.beatsToSamples(15.9, tempo, &context), .note = 60 },
     };
 
-    g_seq = try seq.Sequencer.init(A, pat[0..]);
-    defer g_seq.deinit(A);
-    var seq_ctx = audio.Context.init(A, 48_000, 420); // TODO just have 2 floats for sr and bpm?
+    g_midi_player = try midi.Player.init(A, &notes);
+    defer g_midi_player.deinit(A);
 
     var offset: i8 = 0;
     var key_state = std.AutoHashMap(rl.KeyboardKey, ?u8).init(A);
@@ -335,7 +284,7 @@ pub fn main() !void {
         if (total < last_samples_seen) unreachable;
         const delta = total - last_samples_seen;
         last_samples_seen = total;
-        g_seq.advance(&seq_ctx, delta, &g_note_queue);
+        g_midi_player.advance(delta, &g_note_queue);
 
         if (rl.isKeyPressed(.up)) params.cutoff *= 1.1;
         if (rl.isKeyPressed(.down)) params.cutoff *= 0.9;
