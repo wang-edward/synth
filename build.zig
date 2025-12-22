@@ -87,4 +87,22 @@ pub fn build(b: *std.Build) void {
     const run_exe_unit_tests = b.addRunArtifact(unit_tests);
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_exe_unit_tests.step);
+
+    // op example
+    const op_exe = b.addExecutable(.{
+        .name = "op",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/op/op.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "queue", .module = queue_mod },
+            },
+        }),
+    });
+    b.installArtifact(op_exe);
+    const run_cmd_op = b.addRunArtifact(op_exe);
+    if (b.args) |args| run_cmd_op.addArgs(args);
+    const run_step_op = b.step("op", "Run op example");
+    run_step_op.dependOn(&run_cmd_op.step);
 }
