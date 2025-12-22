@@ -2,7 +2,7 @@ const std = @import("std");
 const SpscQueue = @import("queue").SpscQueue;
 
 pub const ParamRef = union(enum) {
-    Lpf: Lpf.Params,
+    Lpf: Lpf.Param,
 };
 pub const Op = union(enum) {
     SetParam: struct {
@@ -20,23 +20,38 @@ pub const Lpf = struct {
         resonance: f32,
         cutoff: f32,
     };
+    pub const Param = enum {
+        drive,
+        resonance,
+        cutoff,
+    };
     params: Params,
 
     pub fn init(params: Params) Lpf {
         return .{ .params = params };
     }
+    pub fn setParam(self: *Lpf, p: Param, to: f32) void {
+        switch (p) {
+            .drive => self.params.drive = to,
+            .resonance => self.params.resonance = to,
+            .cutoff => self.params.cutoff = to,
+        }
+    }
 };
 
 var opQueue: SpscQueue(Op, 16) = .{};
-var myLpf = Lpf.init(.{ 0.1, 1.0, 10.0 });
+var myLpf = Lpf.init(.{ .drive = 0.1, .resonance = 1.0, .cutoff = 10.0 });
 
 fn audioThreadMain() !void {
     while (true) {
         if (opQueue.pop()) |op| {
             switch (op) {
-                Op.SetParam => std.debug.print("set param {}\n", .{op}),
+                .SetParam => |sp| switch (sp.param) {
+                    .Lpf => |p| myLpf.setParam(p, sp.to),
+                },
             }
         }
+        std.debug.print("lpf: {}\n", .{myLpf});
     }
 }
 
@@ -47,11 +62,7 @@ pub fn main() !void {
         while (!opQueue.push(.{ .SetParam = .{
             .track_id = 0,
             .plugin_id = 0,
-            .param = .{ .Lpf = .{
-                .drive = 0.5,
-                .resonance = 0.7,
-                .cutoff = 1000.0,
-            } },
+            .param = .{ .Lpf = .cutoff },
             .from = 0.0,
             .to = 1.0,
         } })) {}
