@@ -1,8 +1,8 @@
 const std = @import("std");
 const rl = @import("raylib");
 
-const WIDTH = 128;
-const HEIGHT = 128;
+pub const WIDTH = 128;
+pub const HEIGHT = 128;
 
 pub const Event = struct {
     type: EventType,
@@ -18,7 +18,6 @@ var target: rl.RenderTexture2D = undefined;
 var keys_pressed: std.AutoHashMap(i32, bool) = undefined;
 
 pub fn init(allocator: std.mem.Allocator) !void {
-    rl.setConfigFlags(.{ .window_resizable = true });
     rl.initWindow(512, 512, "LeDaw");
 
     target = try rl.loadRenderTexture(WIDTH, HEIGHT);
