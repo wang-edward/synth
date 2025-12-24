@@ -28,8 +28,8 @@ pub const Player = struct {
         alloc.free(self.notes);
     }
     pub fn advance(self: *Player, start: Frame, end: Frame, q: *synth.NoteQueue) void {
-        std.debug.print("start: {}, end: {}", .{ start, end });
-        std.debug.print("notes: {any}", .{self.notes});
+        // std.debug.print("start: {}, end: {}", .{ start, end });
+        // std.debug.print("notes: {any}", .{self.notes});
         std.debug.assert(end >= start);
         std.debug.assert(end - start < 8192);
 
