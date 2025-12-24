@@ -17,6 +17,7 @@ const SharedParams = struct {
 var g_params_slots: [2]SharedParams = .{ .{}, .{} }; // front/back
 var g_params_idx = std.atomic.Value(u8).init(0); // index of *current* (front) slot
 var g_note_queue: synth.NoteQueue = .{};
+var g_preview_note_queue: synth.NoteQueue = .{};
 var g_playhead: u64 = 0;
 var g_playing: bool = false;
 var g_midi_player: midi.Player = undefined;
@@ -91,9 +92,20 @@ fn write_callback(
         must(c.soundio_outstream_begin_write(maybe_outstream, @ptrCast(&areas), &frame_count));
         if (frame_count == 0) break;
 
-        // process note msgs
-        while (true) {
-            const msg = g_note_queue.pop() orelse break;
+        // process note
+        while (g_note_queue.pop()) |msg| {
+            switch (msg) {
+                .Off => |note| {
+                    leSynth.noteOff(note);
+                },
+                .On => |note| {
+                    leSynth.noteOn(note);
+                },
+            }
+        }
+
+        // process preview notes
+        while (g_preview_note_queue.pop()) |msg| {
             switch (msg) {
                 .Off => |note| {
                     leSynth.noteOff(note);
@@ -284,13 +296,13 @@ pub fn main() !void {
             if (down and active_note == null) {
                 if (keyToMidi(key)) |base| {
                     const note: u8 = @intCast(@as(i16, base) + @as(i16, offset));
-                    while (!g_note_queue.push(.{ .On = note })) {} // TODO remove blocking?
+                    while (!g_preview_note_queue.push(.{ .On = note })) {} // TODO remove blocking?
                     try key_state.put(key, note);
 
                     std.debug.print("key pressed {}\n", .{key});
                 }
             } else if (!down and active_note != null) {
-                while (!g_note_queue.push(.{ .Off = active_note.? })) {} // TODO remove blocking?
+                while (!g_preview_note_queue.push(.{ .Off = active_note.? })) {} // TODO remove blocking?
                 try key_state.put(key, null);
 
                 std.debug.print("key released {}\n", .{key});
