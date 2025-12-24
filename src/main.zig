@@ -121,8 +121,7 @@ fn write_callback(
             std.debug.print("op: {}", .{op});
             switch (op) {
                 .Playback => |p| switch (p) {
-                    .Play => g_playing = true,
-                    .Pause => g_playing = false,
+                    .TogglePlay => g_playing = !g_playing,
                     .Reset => g_playhead = 0,
                     .Seek => |frame| g_playhead = frame,
                 },
@@ -320,10 +319,6 @@ pub fn main() !void {
 
         if (rl.isKeyPressed(.space)) {
             while (!g_op_queue.push(.{ .Playback = .Play })) {}
-        }
-
-        if (rl.isKeyPressed(.enter)) {
-            while (!g_op_queue.push(.{ .Playback = .Pause })) {}
         }
 
         if (rl.isKeyPressed(.r)) {

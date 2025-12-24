@@ -1,7 +1,6 @@
 const SpscQueue = @import("queue.zig").SpscQueue;
 pub const PlaybackOp = union(enum) {
-    Play,
-    Pause,
+    TogglePlay,
     Reset,
     Seek: u64,
 };
