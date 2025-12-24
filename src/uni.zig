@@ -123,6 +123,14 @@ pub const Uni = struct {
         for (self.voices) |v| v.setNoteOff(note);
         // TODO raise warning if note not found?
     }
+    pub fn allNotesOff(self: *Uni) void {
+        for (self.voices) |v| {
+            switch (v.noteState) {
+                .On => |note| v.setNoteOff(note),
+                .Off => {},
+            }
+        }
+    }
     pub fn setLpfCutoff(self: *Uni, cutoff: f32) void {
         for (self.voices) |v| v.setLpfCutoff(cutoff);
     }

@@ -102,12 +102,21 @@ fn write_callback(
 
         // process Ops
         while (g_op_queue.pop()) |op| {
-            std.debug.print("op: {}", .{op});
+            std.debug.print("op: {}\n", .{op});
             switch (op) {
                 .Playback => |p| switch (p) {
-                    .TogglePlay => g_playing = !g_playing,
-                    .Reset => g_playhead = 0,
-                    .Seek => |frame| g_playhead = frame,
+                    .TogglePlay => {
+                        leSynth.allNotesOff();
+                        g_playing = !g_playing;
+                    },
+                    .Reset => {
+                        leSynth.allNotesOff();
+                        g_playhead = 0;
+                    },
+                    .Seek => |frame| {
+                        leSynth.allNotesOff();
+                        g_playhead = frame;
+                    },
                 },
             }
         }
