@@ -17,7 +17,6 @@ const SharedParams = struct {
 var g_params_slots: [2]SharedParams = .{ .{}, .{} }; // front/back
 var g_params_idx = std.atomic.Value(u8).init(0); // index of *current* (front) slot
 var g_note_queue: synth.NoteQueue = .{};
-var g_preview_note_queue: synth.NoteQueue = .{};
 var g_playhead: u64 = 0;
 var g_playing: bool = false;
 var g_midi_player: midi.Player = undefined;
@@ -80,6 +79,7 @@ fn write_callback(
     leSynth.setLpfCutoff(params.cutoff);
 
     var frames_left = max;
+    var midi_notes: [midi.MAX_NOTES_PER_BLOCK]synth.NoteMsg = undefined;
 
     // Rebuild the temp arena for this callback
     scratch_fba = std.heap.FixedBufferAllocator.init(&scratch_mem);
@@ -95,24 +95,8 @@ fn write_callback(
         // process note
         while (g_note_queue.pop()) |msg| {
             switch (msg) {
-                .Off => |note| {
-                    leSynth.noteOff(note);
-                },
-                .On => |note| {
-                    leSynth.noteOn(note);
-                },
-            }
-        }
-
-        // process preview notes
-        while (g_preview_note_queue.pop()) |msg| {
-            switch (msg) {
-                .Off => |note| {
-                    leSynth.noteOff(note);
-                },
-                .On => |note| {
-                    leSynth.noteOn(note);
-                },
+                .Off => |note| leSynth.noteOff(note),
+                .On => |note| leSynth.noteOn(note),
             }
         }
 
@@ -151,7 +135,14 @@ fn write_callback(
         if (g_playing) {
             const start = g_playhead;
             g_playhead += @intCast(frame_count);
-            g_midi_player.advance(start, g_playhead, &g_note_queue);
+
+            const n = g_midi_player.advance(start, g_playhead, &midi_notes);
+            for (midi_notes[0..n]) |msg| {
+                switch (msg) {
+                    .Off => |note| leSynth.noteOff(note),
+                    .On => |note| leSynth.noteOn(note),
+                }
+            }
         }
 
         frames_left -= frame_count;
@@ -295,13 +286,13 @@ pub fn main() !void {
             if (down and active_note == null) {
                 if (keyToMidi(key)) |base| {
                     const note: u8 = @intCast(@as(i16, base) + @as(i16, offset));
-                    while (!g_preview_note_queue.push(.{ .On = note })) {} // TODO remove blocking?
+                    while (!g_note_queue.push(.{ .On = note })) {} // TODO remove blocking?
                     try key_state.put(key, note);
 
                     std.debug.print("key pressed {}\n", .{key});
                 }
             } else if (!down and active_note != null) {
-                while (!g_preview_note_queue.push(.{ .Off = active_note.? })) {} // TODO remove blocking?
+                while (!g_note_queue.push(.{ .Off = active_note.? })) {} // TODO remove blocking?
                 try key_state.put(key, null);
 
                 std.debug.print("key released {}\n", .{key});
@@ -318,7 +309,7 @@ pub fn main() !void {
         if (rl.isKeyPressed(.z)) offset -= 12;
 
         if (rl.isKeyPressed(.space)) {
-            while (!g_op_queue.push(.{ .Playback = .Play })) {}
+            while (!g_op_queue.push(.{ .Playback = .TogglePlay })) {}
         }
 
         if (rl.isKeyPressed(.r)) {
