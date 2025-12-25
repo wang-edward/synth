@@ -6,6 +6,7 @@ const uni = @import("uni.zig");
 const queue = @import("queue.zig");
 const synth = @import("synth.zig");
 const midi = @import("midi.zig");
+const ops = @import("ops.zig");
 
 const SharedParams = struct {
     drive: f32 = 1.0,
@@ -16,8 +17,10 @@ const SharedParams = struct {
 var g_params_slots: [2]SharedParams = .{ .{}, .{} }; // front/back
 var g_params_idx = std.atomic.Value(u8).init(0); // index of *current* (front) slot
 var g_note_queue: synth.NoteQueue = .{};
-var g_frames_processed: std.atomic.Value(u64) = .init(0);
+var g_playhead: u64 = 0;
+var g_playing: bool = false;
 var g_midi_player: midi.Player = undefined;
+var g_op_queue: ops.OpQueue = .{};
 
 inline fn paramsReadSnapshot() SharedParams {
     // Audio thread: acquire to see a consistent published slot
@@ -72,10 +75,11 @@ fn write_callback(
     const chans: usize = @intCast(layout.channel_count);
 
     // Snapshot params once per callback
-    const p = paramsReadSnapshot();
-    leSynth.setLpfCutoff(p.cutoff);
+    const params = paramsReadSnapshot();
+    leSynth.setLpfCutoff(params.cutoff);
 
     var frames_left = max;
+    var midi_notes: [midi.MAX_NOTES_PER_BLOCK]synth.NoteMsg = undefined;
 
     // Rebuild the temp arena for this callback
     scratch_fba = std.heap.FixedBufferAllocator.init(&scratch_mem);
@@ -88,14 +92,31 @@ fn write_callback(
         must(c.soundio_outstream_begin_write(maybe_outstream, @ptrCast(&areas), &frame_count));
         if (frame_count == 0) break;
 
-        while (true) {
-            const msg = g_note_queue.pop() orelse break;
+        // process note
+        while (g_note_queue.pop()) |msg| {
             switch (msg) {
-                .Off => |note| {
-                    leSynth.noteOff(note);
-                },
-                .On => |note| {
-                    leSynth.noteOn(note);
+                .Off => |note| leSynth.noteOff(note),
+                .On => |note| leSynth.noteOn(note),
+            }
+        }
+
+        // process Ops
+        while (g_op_queue.pop()) |op| {
+            std.debug.print("op: {}\n", .{op});
+            switch (op) {
+                .Playback => |p| switch (p) {
+                    .TogglePlay => {
+                        leSynth.allNotesOff();
+                        g_playing = !g_playing;
+                    },
+                    .Reset => {
+                        leSynth.allNotesOff();
+                        g_playhead = 0;
+                    },
+                    .Seek => |frame| {
+                        leSynth.allNotesOff();
+                        g_playhead = frame;
+                    },
                 },
             }
         }
@@ -119,7 +140,19 @@ fn write_callback(
             }
         }
 
-        _ = g_frames_processed.fetchAdd(@intCast(frame_count), .release);
+        // advance playhead
+        if (g_playing) {
+            const start = g_playhead;
+            g_playhead += @intCast(frame_count);
+
+            const n = g_midi_player.advance(start, g_playhead, &midi_notes);
+            for (midi_notes[0..n]) |msg| {
+                switch (msg) {
+                    .Off => |note| leSynth.noteOff(note),
+                    .On => |note| leSynth.noteOn(note),
+                }
+            }
+        }
 
         frames_left -= frame_count;
         must(c.soundio_outstream_end_write(maybe_outstream));
@@ -132,8 +165,6 @@ fn underflow_callback(_: ?[*]c.SoundIoOutStream) callconv(.c) void {
 
 // =============================== Audio thread entry ==================================
 fn audioThreadMain() !void {
-    // Build graph heap storage (Mixer inputs array)
-
     leSynth = try uni.Uni.init(A, 4);
     defer leSynth.deinit(A);
 
@@ -174,7 +205,28 @@ fn audioThreadMain() !void {
 
     must(c.soundio_outstream_start(out.?));
 
-    // Pump events (stays on audio thread)
+    // lesynth setup
+    const tempo: f32 = 120;
+    const notes = [_]midi.Note{
+        .{ .start = midi.beatsToFrames(0.0, tempo, &context), .end = midi.beatsToFrames(0.9, tempo, &context), .note = 60 },
+        .{ .start = midi.beatsToFrames(1.0, tempo, &context), .end = midi.beatsToFrames(1.9, tempo, &context), .note = 60 },
+        .{ .start = midi.beatsToFrames(2.0, tempo, &context), .end = midi.beatsToFrames(2.9, tempo, &context), .note = 67 },
+        .{ .start = midi.beatsToFrames(3.0, tempo, &context), .end = midi.beatsToFrames(3.9, tempo, &context), .note = 67 },
+        .{ .start = midi.beatsToFrames(4.0, tempo, &context), .end = midi.beatsToFrames(4.9, tempo, &context), .note = 69 },
+        .{ .start = midi.beatsToFrames(5.0, tempo, &context), .end = midi.beatsToFrames(5.9, tempo, &context), .note = 69 },
+        .{ .start = midi.beatsToFrames(6.0, tempo, &context), .end = midi.beatsToFrames(7.9, tempo, &context), .note = 67 },
+        .{ .start = midi.beatsToFrames(8.0, tempo, &context), .end = midi.beatsToFrames(8.9, tempo, &context), .note = 65 },
+        .{ .start = midi.beatsToFrames(9.0, tempo, &context), .end = midi.beatsToFrames(9.9, tempo, &context), .note = 65 },
+        .{ .start = midi.beatsToFrames(10.0, tempo, &context), .end = midi.beatsToFrames(10.9, tempo, &context), .note = 64 },
+        .{ .start = midi.beatsToFrames(11.0, tempo, &context), .end = midi.beatsToFrames(11.9, tempo, &context), .note = 64 },
+        .{ .start = midi.beatsToFrames(12.0, tempo, &context), .end = midi.beatsToFrames(12.9, tempo, &context), .note = 62 },
+        .{ .start = midi.beatsToFrames(13.0, tempo, &context), .end = midi.beatsToFrames(13.9, tempo, &context), .note = 62 },
+        .{ .start = midi.beatsToFrames(14.0, tempo, &context), .end = midi.beatsToFrames(15.9, tempo, &context), .note = 60 },
+    };
+
+    g_midi_player = try midi.Player.init(A, &notes);
+    defer g_midi_player.deinit(A);
+
     while (g_run_audio.load(.acquire)) {
         c.soundio_wait_events(sio);
     }
@@ -230,34 +282,10 @@ pub fn main() !void {
     var params = SharedParams{};
     paramsPublish(params);
 
-    const tempo: f32 = 120;
-
-    const notes = [_]midi.Note{
-        .{ .start = midi.beatsToFrames(0.0, tempo, &context), .end = midi.beatsToFrames(0.9, tempo, &context), .note = 60 },
-        .{ .start = midi.beatsToFrames(1.0, tempo, &context), .end = midi.beatsToFrames(1.9, tempo, &context), .note = 60 },
-        .{ .start = midi.beatsToFrames(2.0, tempo, &context), .end = midi.beatsToFrames(2.9, tempo, &context), .note = 67 },
-        .{ .start = midi.beatsToFrames(3.0, tempo, &context), .end = midi.beatsToFrames(3.9, tempo, &context), .note = 67 },
-        .{ .start = midi.beatsToFrames(4.0, tempo, &context), .end = midi.beatsToFrames(4.9, tempo, &context), .note = 69 },
-        .{ .start = midi.beatsToFrames(5.0, tempo, &context), .end = midi.beatsToFrames(5.9, tempo, &context), .note = 69 },
-        .{ .start = midi.beatsToFrames(6.0, tempo, &context), .end = midi.beatsToFrames(7.9, tempo, &context), .note = 67 },
-        .{ .start = midi.beatsToFrames(8.0, tempo, &context), .end = midi.beatsToFrames(8.9, tempo, &context), .note = 65 },
-        .{ .start = midi.beatsToFrames(9.0, tempo, &context), .end = midi.beatsToFrames(9.9, tempo, &context), .note = 65 },
-        .{ .start = midi.beatsToFrames(10.0, tempo, &context), .end = midi.beatsToFrames(10.9, tempo, &context), .note = 64 },
-        .{ .start = midi.beatsToFrames(11.0, tempo, &context), .end = midi.beatsToFrames(11.9, tempo, &context), .note = 64 },
-        .{ .start = midi.beatsToFrames(12.0, tempo, &context), .end = midi.beatsToFrames(12.9, tempo, &context), .note = 62 },
-        .{ .start = midi.beatsToFrames(13.0, tempo, &context), .end = midi.beatsToFrames(13.9, tempo, &context), .note = 62 },
-        .{ .start = midi.beatsToFrames(14.0, tempo, &context), .end = midi.beatsToFrames(15.9, tempo, &context), .note = 60 },
-    };
-
-    g_midi_player = try midi.Player.init(A, &notes);
-    defer g_midi_player.deinit(A);
-
     var offset: i8 = 0;
     var key_state = std.AutoHashMap(rl.KeyboardKey, ?u8).init(A);
     defer key_state.deinit();
     for (note_keys) |k| try key_state.put(k, null);
-
-    var last_frames_seen: u64 = 0;
 
     while (!rl.windowShouldClose()) {
         for (note_keys) |key| {
@@ -280,12 +308,6 @@ pub fn main() !void {
             }
         }
 
-        const total = g_frames_processed.load(.acquire);
-        if (total < last_frames_seen) unreachable;
-        const delta = total - last_frames_seen;
-        last_frames_seen = total;
-        g_midi_player.advance(delta, &g_note_queue);
-
         if (rl.isKeyPressed(.up)) params.cutoff *= 1.1;
         if (rl.isKeyPressed(.down)) params.cutoff *= 0.9;
         params.cutoff = std.math.clamp(params.cutoff, 100.0, 5000.0);
@@ -294,6 +316,14 @@ pub fn main() !void {
 
         if (rl.isKeyPressed(.x)) offset += 12;
         if (rl.isKeyPressed(.z)) offset -= 12;
+
+        if (rl.isKeyPressed(.space)) {
+            while (!g_op_queue.push(.{ .Playback = .TogglePlay })) {}
+        }
+
+        if (rl.isKeyPressed(.r)) {
+            while (!g_op_queue.push(.{ .Playback = .Reset })) {}
+        }
 
         // draw UI
         rl.beginDrawing();

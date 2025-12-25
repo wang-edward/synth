@@ -3,6 +3,7 @@ const audio = @import("audio.zig");
 const synth = @import("synth.zig");
 
 pub const Frame = u64;
+pub const MAX_NOTES_PER_BLOCK = 1024; // big on purpose
 
 pub const Note = struct {
     start: Frame,
@@ -16,40 +17,46 @@ pub fn beatsToFrames(beats: f32, tempo: f32, ctx: *audio.Context) Frame {
 
 pub const Player = struct {
     notes: []Note,
-    sample_accum: Frame = 0,
     pub fn init(alloc: std.mem.Allocator, notes_in: []const Note) !Player {
         const notes = try alloc.alloc(Note, notes_in.len);
         std.mem.copyForwards(Note, notes, notes_in);
 
         return .{
             .notes = notes,
-            .sample_accum = 0,
         };
     }
     pub fn deinit(self: *Player, alloc: std.mem.Allocator) void {
         alloc.free(self.notes);
     }
-    pub fn advance(self: *Player, frames_elapsed: u64, q: *synth.NoteQueue) void {
-        const pre_accum = self.sample_accum;
-        const post_accum = self.sample_accum + frames_elapsed;
-        self.sample_accum = post_accum;
+    pub fn advance(self: *Player, start: Frame, end: Frame, out: []synth.NoteMsg) usize {
+        // std.debug.print("start: {}, end: {}", .{ start, end });
+        // std.debug.print("notes: {any}", .{self.notes});
+        std.debug.assert(end >= start);
+        std.debug.assert(end - start < 8192);
 
-        // std.debug.print("frames_elapsed: {}, pre_accum: {}, post_accum: {}\n", .{ frames_elapsed, pre_accum, post_accum });
-        std.debug.assert(frames_elapsed < 8192);
+        var count: usize = 0;
 
         for (self.notes) |n| {
             // TODO check what happens when advance() is called on the latter boundary wrt <, <=
             // so what if pre_accum == n.start... is this even a problem?
-            if (pre_accum <= n.start and n.start < post_accum) {
-                // std.debug.print("on: {}\n", .{n});
-                while (!q.push(.{ .On = n.note })) {}
+            //
+            // TODO better array that doesn't need manual counting?
+            if (start <= n.start and n.start < end) {
+                if (count < out.len) {
+                    std.debug.print("on: {}\n", .{n});
+                    out[count] = .{ .On = n.note };
+                    count += 1;
+                }
             }
-            // TODO what if both start and end pass in the same frames_elapsed?
-            // might lead to a hanging note?
-            if (pre_accum <= n.end and n.end < post_accum) {
-                // std.debug.print("off: {}\n", .{n});
-                while (!q.push(.{ .Off = n.note })) {}
+            if (start <= n.end and n.end < end) {
+                if (count < out.len) {
+                    std.debug.print("on: {}\n", .{n});
+                    std.debug.print("off: {}\n", .{n});
+                    out[count] = .{ .Off = n.note };
+                    count += 1;
+                }
             }
         }
+        return count;
     }
 };
