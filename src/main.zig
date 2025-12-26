@@ -7,6 +7,7 @@ const queue = @import("queue.zig");
 const midi = @import("midi.zig");
 const ops = @import("ops.zig");
 const interface = @import("interface.zig");
+const project = @import("project.zig");
 
 const SharedParams = struct {
     drive: f32 = 1.0,
@@ -19,7 +20,7 @@ var g_params_idx = std.atomic.Value(u8).init(0); // index of *current* (front) s
 var g_note_queue: midi.NoteQueue = .{};
 var g_playhead: u64 = 0;
 var g_playing: bool = false;
-var g_midi_player: midi.Player = undefined;
+var g_timeline: project.Timeline = undefined;
 var g_op_queue: ops.OpQueue = .{};
 
 inline fn paramsReadSnapshot() SharedParams {
@@ -145,11 +146,13 @@ fn write_callback(
             const start = g_playhead;
             g_playhead += @intCast(frame_count);
 
-            const n = g_midi_player.advance(start, g_playhead, &midi_notes);
-            for (midi_notes[0..n]) |msg| {
-                switch (msg) {
-                    .Off => |note| leSynth.noteOff(note),
-                    .On => |note| leSynth.noteOn(note),
+            for (g_timeline.tracks) |*track| {
+                const n = track.player.advance(start, g_playhead, &midi_notes);
+                for (midi_notes[0..n]) |msg| {
+                    switch (msg) {
+                        .Off => |note| track.synth.noteOff(note),
+                        .On => |note| track.synth.noteOn(note),
+                    }
                 }
             }
         }
@@ -224,8 +227,16 @@ fn audioThreadMain() !void {
         .{ .start = midi.beatsToFrames(14.0, tempo, &context), .end = midi.beatsToFrames(15.9, tempo, &context), .note = 60 },
     };
 
-    g_midi_player = try midi.Player.init(A, &notes);
-    defer g_midi_player.deinit(A);
+    var tracks = try A.alloc(project.Track, 2);
+    tracks[0] = try project.Track.init(A, leSynth, &notes);
+    // TODO make this timeline.init/deinit
+    g_timeline = .{
+        .tracks = tracks,
+    };
+    defer {
+        for (g_timeline.tracks) |*t| t.deinit(A);
+        A.free(g_timeline.tracks);
+    }
 
     while (g_run_audio.load(.acquire)) {
         c.soundio_wait_events(sio);

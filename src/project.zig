@@ -1,4 +1,4 @@
-const std = @import("std.zig");
+const std = @import("std");
 const uni = @import("uni.zig");
 const midi = @import("midi.zig");
 pub const Timeline = struct {
@@ -15,7 +15,7 @@ pub const Track = struct {
             .player = try midi.Player.init(alloc, notes_in),
         };
     }
-    pub fn deinit(self: Track, alloc: std.mem.Allocator) void {
+    pub fn deinit(self: *Track, alloc: std.mem.Allocator) void {
         self.player.deinit(alloc);
     }
 };
