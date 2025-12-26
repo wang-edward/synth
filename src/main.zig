@@ -4,7 +4,6 @@ const c = @cImport(@cInclude("soundio/soundio.h"));
 const audio = @import("audio.zig");
 const uni = @import("uni.zig");
 const queue = @import("queue.zig");
-const synth = @import("synth.zig");
 const midi = @import("midi.zig");
 const ops = @import("ops.zig");
 const interface = @import("interface.zig");
@@ -17,7 +16,7 @@ const SharedParams = struct {
 
 var g_params_slots: [2]SharedParams = .{ .{}, .{} }; // front/back
 var g_params_idx = std.atomic.Value(u8).init(0); // index of *current* (front) slot
-var g_note_queue: synth.NoteQueue = .{};
+var g_note_queue: midi.NoteQueue = .{};
 var g_playhead: u64 = 0;
 var g_playing: bool = false;
 var g_midi_player: midi.Player = undefined;
@@ -80,7 +79,7 @@ fn write_callback(
     leSynth.setLpfCutoff(params.cutoff);
 
     var frames_left = max;
-    var midi_notes: [midi.MAX_NOTES_PER_BLOCK]synth.NoteMsg = undefined;
+    var midi_notes: [midi.MAX_NOTES_PER_BLOCK]midi.NoteMsg = undefined;
 
     // Rebuild the temp arena for this callback
     scratch_fba = std.heap.FixedBufferAllocator.init(&scratch_mem);
