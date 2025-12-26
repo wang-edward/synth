@@ -225,10 +225,19 @@ fn audioThreadMain() !void {
         .{ .start = midi.beatsToFrames(13.0, tempo, &context), .end = midi.beatsToFrames(13.9, tempo, &context), .note = 62 },
         .{ .start = midi.beatsToFrames(14.0, tempo, &context), .end = midi.beatsToFrames(15.9, tempo, &context), .note = 60 },
     };
+    const bass_notes = [_]midi.Note{
+        .{ .start = midi.beatsToFrames(0.0, tempo, &context), .end = midi.beatsToFrames(2.0, tempo, &context), .note = 48 },
+        .{ .start = midi.beatsToFrames(2.0, tempo, &context), .end = midi.beatsToFrames(4.0, tempo, &context), .note = 48 },
+        .{ .start = midi.beatsToFrames(4.0, tempo, &context), .end = midi.beatsToFrames(6.0, tempo, &context), .note = 43 },
+        .{ .start = midi.beatsToFrames(6.0, tempo, &context), .end = midi.beatsToFrames(8.0, tempo, &context), .note = 43 },
+        .{ .start = midi.beatsToFrames(8.0, tempo, &context), .end = midi.beatsToFrames(10.0, tempo, &context), .note = 41 },
+        .{ .start = midi.beatsToFrames(10.0, tempo, &context), .end = midi.beatsToFrames(12.0, tempo, &context), .note = 40 },
+        .{ .start = midi.beatsToFrames(12.0, tempo, &context), .end = midi.beatsToFrames(14.0, tempo, &context), .note = 38 },
+        .{ .start = midi.beatsToFrames(14.0, tempo, &context), .end = midi.beatsToFrames(16.0, tempo, &context), .note = 36 },
+    };
+    const notes_per_track = [_][]const midi.Note{ &notes, &bass_notes };
 
-    const notes_per_track = [_][]const midi.Note{&notes};
-
-    g_timeline = try project.Timeline.init(A, 1, 4, &notes_per_track);
+    g_timeline = try project.Timeline.init(A, 2, 4, &notes_per_track);
     defer g_timeline.deinit(A);
     root = g_timeline.asNode();
 
