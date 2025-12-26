@@ -1,6 +1,6 @@
 const std = @import("std");
 const audio = @import("audio.zig");
-const synth = @import("synth.zig");
+const SpscQueue = @import("queue.zig").SpscQueue;
 
 pub const Frame = u64;
 pub const MAX_NOTES_PER_BLOCK = 1024; // big on purpose
@@ -10,6 +10,13 @@ pub const Note = struct {
     end: Frame,
     note: u8,
 };
+
+pub const NoteMsg = union(enum) {
+    On: u8,
+    Off: u8,
+};
+
+pub const NoteQueue = SpscQueue(NoteMsg, 16);
 
 pub fn beatsToFrames(beats: f32, tempo: f32, ctx: *audio.Context) Frame {
     return @intFromFloat((60.0 / tempo) * ctx.sample_rate * beats);
@@ -28,7 +35,7 @@ pub const Player = struct {
     pub fn deinit(self: *Player, alloc: std.mem.Allocator) void {
         alloc.free(self.notes);
     }
-    pub fn advance(self: *Player, start: Frame, end: Frame, out: []synth.NoteMsg) usize {
+    pub fn advance(self: *Player, start: Frame, end: Frame, out: []NoteMsg) usize {
         // std.debug.print("start: {}, end: {}", .{ start, end });
         // std.debug.print("notes: {any}", .{self.notes});
         std.debug.assert(end >= start);
