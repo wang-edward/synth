@@ -7,7 +7,7 @@ const HEIGHT = 128;
 var target: rl.RenderTexture2D = undefined;
 
 pub fn init() !void {
-    // rl.setConfigFlags(.{ .window_resizable = true });
+    // rl.setConfigFlags(.{ .window_resizable = true }); // commented because it looks weird with aerospace window manager
     rl.initWindow(512, 512, "LeDaw");
 
     target = try rl.loadRenderTexture(WIDTH, HEIGHT);
