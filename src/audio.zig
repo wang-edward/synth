@@ -70,9 +70,9 @@ pub const Lpf = struct {
     // Original Implementation: D'Angelo, Valimaki
     pub const THERMAL_VOLTAGE = 0.312;
     input: Node,
-    V: [4]f32 = undefined,
-    dV: [4]f32 = undefined,
-    tV: [4]f32 = undefined,
+    V: [4]f32 = .{ 0, 0, 0, 0 },
+    dV: [4]f32 = .{ 0, 0, 0, 0 },
+    tV: [4]f32 = .{ 0, 0, 0, 0 },
     drive: f32,
     resonance: f32,
     cutoff: f32,
