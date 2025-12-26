@@ -7,6 +7,7 @@ const queue = @import("queue.zig");
 const synth = @import("synth.zig");
 const midi = @import("midi.zig");
 const ops = @import("ops.zig");
+const interface = @import("interface.zig");
 
 const SharedParams = struct {
     drive: f32 = 1.0,
@@ -269,11 +270,8 @@ pub fn main() !void {
         audio_thread.join();
     }
 
-    const w = 720;
-    const h = 480;
-    rl.initWindow(w, h, "leSynth");
-    defer rl.closeWindow();
-    rl.setTargetFPS(60);
+    try interface.init(A);
+    defer interface.deinit(); // TODO pass A?
     const note_keys = [_]rl.KeyboardKey{
         .a, .w, .s, .e, .d,         .f,          .t, .g, .y, .h, .u, .j,
         .k, .o, .l, .p, .semicolon, .apostrophe,
@@ -326,20 +324,20 @@ pub fn main() !void {
         }
 
         // draw UI
-        rl.beginDrawing();
-        defer rl.endDrawing();
-        rl.clearBackground(.black);
-        rl.drawText("Press A-L keys to play notes (W, E, etc. for sharp/flat)", 20, 20, 20, .white);
-        rl.drawText("Z/X to change octave", 20, 40, 20, .white);
+        interface.preRender();
+        defer interface.postRender();
+        {
+            rl.drawText("A-L: play notes", 2, 2, 10, .white);
+            rl.drawText("Z/X: change octave", 2, 14, 10, .white);
 
-        rl.drawText("Press ESC to quit", 20, 440, 20, .gray);
-        rl.drawText("Up / Down to change filter cutoff", 20, 70, 20, .white);
-        var buf: [160]u8 = undefined;
-        const line = std.fmt.bufPrintZ(
-            &buf,
-            "cutoff: {d:.0}, offset: {d:.0}",
-            .{ params.cutoff, @divTrunc(offset, 12) },
-        ) catch "params";
-        rl.drawText(line, 360, 240, 20, .white);
+            var buf: [160]u8 = undefined;
+            const line = std.fmt.bufPrintZ(
+                &buf,
+                "cutoff: {d:.0}, offset: {d:.0}",
+                .{ params.cutoff, @divTrunc(offset, 12) },
+            ) catch "params";
+            rl.drawText(line, 2, 26, 10, .white);
+            rl.drawRectangleLines(0, 0, 128, 128, rl.Color.purple);
+        }
     }
 }
