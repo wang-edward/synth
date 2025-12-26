@@ -229,10 +229,7 @@ fn audioThreadMain() !void {
     const notes_per_track = [_][]const midi.Note{&notes};
 
     g_timeline = try project.Timeline.init(A, 1, 4, &notes_per_track);
-    defer {
-        for (g_timeline.tracks) |*t| t.deinit(A);
-        A.free(g_timeline.tracks);
-    }
+    defer g_timeline.deinit(A);
     root = g_timeline.asNode();
 
     while (g_run_audio.load(.acquire)) {

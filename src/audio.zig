@@ -150,6 +150,9 @@ pub const Mixer = struct {
         std.mem.copyForwards(Node, m.inputs, inputs);
         return m;
     }
+    pub fn deinit(self: *Mixer, a: std.mem.Allocator) void {
+        a.free(self.inputs);
+    }
     fn _process(p: *anyopaque, ctx: *Context, out: []Sample) void {
         const self: *Mixer = @ptrCast(@alignCast(p));
         @memset(out, 0);

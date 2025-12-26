@@ -22,6 +22,8 @@ pub const Timeline = struct {
             );
         }
         var nodes = try alloc.alloc(audio.Node, num_tracks);
+        defer alloc.free(nodes);
+
         for (tracks, 0..) |*t, i| {
             nodes[i] = t.synth.asNode();
         }
@@ -34,7 +36,8 @@ pub const Timeline = struct {
     pub fn deinit(self: *Timeline, alloc: std.mem.Allocator) void {
         for (self.tracks) |*t| t.deinit(alloc);
         alloc.free(self.tracks);
-        alloc.free(self.mixer.inputs);
+
+        self.mixer.deinit(alloc);
         alloc.destroy(self.mixer);
     }
     pub fn asNode(self: *Timeline) audio.Node {
