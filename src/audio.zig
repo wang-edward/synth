@@ -70,9 +70,9 @@ pub const Lpf = struct {
     // Original Implementation: D'Angelo, Valimaki
     pub const THERMAL_VOLTAGE = 0.312;
     input: Node,
-    V: [4]f32 = undefined,
-    dV: [4]f32 = undefined,
-    tV: [4]f32 = undefined,
+    V: [4]f32 = .{ 0, 0, 0, 0 },
+    dV: [4]f32 = .{ 0, 0, 0, 0 },
+    tV: [4]f32 = .{ 0, 0, 0, 0 },
     drive: f32,
     resonance: f32,
     cutoff: f32,
@@ -149,6 +149,9 @@ pub const Mixer = struct {
         m.* = .{ .inputs = try a.alloc(Node, inputs.len) };
         std.mem.copyForwards(Node, m.inputs, inputs);
         return m;
+    }
+    pub fn deinit(self: *Mixer, a: std.mem.Allocator) void {
+        a.free(self.inputs);
     }
     fn _process(p: *anyopaque, ctx: *Context, out: []Sample) void {
         const self: *Mixer = @ptrCast(@alignCast(p));
