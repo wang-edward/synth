@@ -9,32 +9,37 @@ const ops = @import("ops.zig");
 const interface = @import("interface.zig");
 const project = @import("project.zig");
 
-const SharedParams = struct {
-    drive: f32 = 1.0,
-    resonance: f32 = 1.0,
-    cutoff: f32 = 4000.0,
-};
-
-var g_params_slots: [2]SharedParams = .{ .{}, .{} }; // front/back
-var g_params_idx = std.atomic.Value(u8).init(0); // index of *current* (front) slot
+// const SharedParams = struct {
+//     drive: f32 = 1.0,
+//     resonance: f32 = 1.0,
+//     cutoff: f32 = 4000.0,
+// };
+//
+// var g_params_slots: [2]SharedParams = .{ .{}, .{} }; // front/back
+// var g_params_idx = std.atomic.Value(u8).init(0); // index of *current* (front) slot
 var g_note_queue: midi.NoteQueue = .{};
 var g_playhead: u64 = 0;
 var g_playing: bool = false;
 var g_timeline: project.Timeline = undefined;
 var g_op_queue: ops.OpQueue = .{};
+var g_active_track: usize = 0;
 
-inline fn paramsReadSnapshot() SharedParams {
-    // Audio thread: acquire to see a consistent published slot
-    const i = g_params_idx.load(.acquire);
-    return g_params_slots[i]; // copy to a local snapshot (small POD copy)
+inline fn getActiveTrack() *project.Track {
+    return &g_timeline.tracks[g_active_track];
 }
 
-inline fn paramsPublish(newp: SharedParams) void {
-    const r = g_params_idx.load(.acquire);
-    const w = r ^ 1; // back slot
-    g_params_slots[w] = newp; // copy the whole struct
-    g_params_idx.store(w, .release);
-}
+// inline fn paramsReadSnapshot() SharedParams {
+//     // Audio thread: acquire to see a consistent published slot
+//     const i = g_params_idx.load(.acquire);
+//     return g_params_slots[i]; // copy to a local snapshot (small POD copy)
+// }
+//
+// inline fn paramsPublish(newp: SharedParams) void {
+//     const r = g_params_idx.load(.acquire);
+//     const w = r ^ 1; // back slot
+//     g_params_slots[w] = newp; // copy the whole struct
+//     g_params_idx.store(w, .release);
+// }
 
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 const A = gpa.allocator();
@@ -45,7 +50,6 @@ var scratch_fba = std.heap.FixedBufferAllocator.init(&scratch_mem);
 var context: audio.Context = undefined;
 
 // graph objects
-var leSynth: *uni.Uni = undefined;
 var root: audio.Node = undefined;
 
 // libsoundio state (used only on audio thread)
@@ -76,8 +80,8 @@ fn write_callback(
     const chans: usize = @intCast(layout.channel_count);
 
     // Snapshot params once per callback
-    const params = paramsReadSnapshot();
-    leSynth.setLpfCutoff(params.cutoff);
+    // const params = paramsReadSnapshot();
+    // leSynth.setLpfCutoff(params.cutoff); // TODO route Op to track
 
     var frames_left = max;
     var midi_notes: [midi.MAX_NOTES_PER_BLOCK]midi.NoteMsg = undefined;
@@ -96,8 +100,8 @@ fn write_callback(
         // process note
         while (g_note_queue.pop()) |msg| {
             switch (msg) {
-                .Off => |note| leSynth.noteOff(note),
-                .On => |note| leSynth.noteOn(note),
+                .Off => |note| getActiveTrack().synth.noteOff(note),
+                .On => |note| getActiveTrack().synth.noteOn(note),
             }
         }
 
@@ -107,15 +111,15 @@ fn write_callback(
             switch (op) {
                 .Playback => |p| switch (p) {
                     .TogglePlay => {
-                        leSynth.allNotesOff();
+                        getActiveTrack().synth.allNotesOff();
                         g_playing = !g_playing;
                     },
                     .Reset => {
-                        leSynth.allNotesOff();
+                        getActiveTrack().synth.allNotesOff();
                         g_playhead = 0;
                     },
                     .Seek => |frame| {
-                        leSynth.allNotesOff();
+                        getActiveTrack().synth.allNotesOff();
                         g_playhead = frame;
                     },
                 },
@@ -168,11 +172,6 @@ fn underflow_callback(_: ?[*]c.SoundIoOutStream) callconv(.c) void {
 
 // =============================== Audio thread entry ==================================
 fn audioThreadMain() !void {
-    leSynth = try uni.Uni.init(A, 4);
-    defer leSynth.deinit(A);
-
-    root = leSynth.asNode();
-
     // SoundIO setup
     sio = c.soundio_create();
     if (sio == null) return error.NoMem;
@@ -227,16 +226,14 @@ fn audioThreadMain() !void {
         .{ .start = midi.beatsToFrames(14.0, tempo, &context), .end = midi.beatsToFrames(15.9, tempo, &context), .note = 60 },
     };
 
-    var tracks = try A.alloc(project.Track, 2);
-    tracks[0] = try project.Track.init(A, leSynth, &notes);
-    // TODO make this timeline.init/deinit
-    g_timeline = .{
-        .tracks = tracks,
-    };
+    const notes_per_track = [_][]const midi.Note{&notes};
+
+    g_timeline = try project.Timeline.init(A, 1, 4, &notes_per_track);
     defer {
         for (g_timeline.tracks) |*t| t.deinit(A);
         A.free(g_timeline.tracks);
     }
+    root = g_timeline.asNode();
 
     while (g_run_audio.load(.acquire)) {
         c.soundio_wait_events(sio);
@@ -287,8 +284,8 @@ pub fn main() !void {
         .k, .o, .l, .p, .semicolon, .apostrophe,
     };
 
-    var params = SharedParams{};
-    paramsPublish(params);
+    // var params = SharedParams{};
+    // paramsPublish(params);
 
     var offset: i8 = 0;
     var key_state = std.AutoHashMap(rl.KeyboardKey, ?u8).init(A);
@@ -316,11 +313,11 @@ pub fn main() !void {
             }
         }
 
-        if (rl.isKeyPressed(.up)) params.cutoff *= 1.1;
-        if (rl.isKeyPressed(.down)) params.cutoff *= 0.9;
-        params.cutoff = std.math.clamp(params.cutoff, 100.0, 5000.0);
-
-        paramsPublish(params);
+        // if (rl.isKeyPressed(.up)) params.cutoff *= 1.1;
+        // if (rl.isKeyPressed(.down)) params.cutoff *= 0.9;
+        // params.cutoff = std.math.clamp(params.cutoff, 100.0, 5000.0);
+        //
+        // paramsPublish(params);
 
         if (rl.isKeyPressed(.x)) offset += 12;
         if (rl.isKeyPressed(.z)) offset -= 12;
@@ -340,13 +337,13 @@ pub fn main() !void {
             rl.drawText("A-L: play notes", 2, 2, 10, .white);
             rl.drawText("Z/X: change octave", 2, 14, 10, .white);
 
-            var buf: [160]u8 = undefined;
-            const line = std.fmt.bufPrintZ(
-                &buf,
-                "cutoff: {d:.0}, offset: {d:.0}",
-                .{ params.cutoff, @divTrunc(offset, 12) },
-            ) catch "params";
-            rl.drawText(line, 2, 26, 10, .white);
+            // var buf: [160]u8 = undefined;
+            // const line = std.fmt.bufPrintZ(
+            //     &buf,
+            //     "cutoff: {d:.0}, offset: {d:.0}",
+            //     .{ params.cutoff, @divTrunc(offset, 12) },
+            // ) catch "params";
+            // rl.drawText(line, 2, 26, 10, .white);
             rl.drawRectangleLines(0, 0, 128, 128, rl.Color.purple);
         }
     }
