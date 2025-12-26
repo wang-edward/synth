@@ -270,8 +270,8 @@ pub fn main() !void {
         audio_thread.join();
     }
 
-    try interface.init(A);
-    defer interface.deinit(); // TODO pass A?
+    try interface.init();
+    defer interface.deinit();
     const note_keys = [_]rl.KeyboardKey{
         .a, .w, .s, .e, .d,         .f,          .t, .g, .y, .h, .u, .j,
         .k, .o, .l, .p, .semicolon, .apostrophe,

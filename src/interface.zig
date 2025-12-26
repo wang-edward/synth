@@ -4,43 +4,18 @@ const rl = @import("raylib");
 const WIDTH = 128;
 const HEIGHT = 128;
 
-pub const Event = struct {
-    type: EventType,
-    key: rl.KeyboardKey,
-};
-
-pub const EventType = enum {
-    key_press,
-    key_release,
-};
-
 var target: rl.RenderTexture2D = undefined;
-var keys_pressed: std.AutoHashMap(i32, bool) = undefined;
 
-pub fn init(allocator: std.mem.Allocator) !void {
+pub fn init() !void {
     // rl.setConfigFlags(.{ .window_resizable = true });
     rl.initWindow(512, 512, "LeDaw");
 
     target = try rl.loadRenderTexture(WIDTH, HEIGHT);
     rl.setTargetFPS(60);
     rl.setExitKey(.null); // ESC doesn't close program
-
-    keys_pressed = std.AutoHashMap(i32, bool).init(allocator);
-
-    // Initialize common keys
-    const tracked_keys = [_]rl.KeyboardKey{
-        .up,    .down,  .left,   .right,
-        .w,     .a,     .s,      .d,
-        .space, .enter, .escape,
-    };
-
-    for (tracked_keys) |key| {
-        try keys_pressed.put(@intFromEnum(key), false);
-    }
 }
 
 pub fn deinit() void {
-    keys_pressed.deinit();
     rl.unloadRenderTexture(target);
     rl.closeWindow();
 }
@@ -81,30 +56,6 @@ pub fn postRender() void {
         0.0,
         rl.Color.white,
     );
-}
-
-pub fn pollEvent(event: *Event) bool {
-    var iter = keys_pressed.iterator();
-    while (iter.next()) |entry| {
-        const key_int = entry.key_ptr.*;
-        const is_pressed = entry.value_ptr;
-        const key: rl.KeyboardKey = @enumFromInt(key_int);
-
-        if (rl.isKeyDown(key)) {
-            if (!is_pressed.*) {
-                is_pressed.* = true;
-                event.type = .key_press;
-                event.key = key;
-                return true;
-            }
-        } else if (is_pressed.*) {
-            is_pressed.* = false;
-            event.type = .key_release;
-            event.key = key;
-            return true;
-        }
-    }
-    return false;
 }
 
 pub fn shouldClose() bool {
