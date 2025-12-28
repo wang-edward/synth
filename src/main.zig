@@ -319,11 +319,16 @@ pub fn main() !void {
             }
         }
 
-        // if (rl.isKeyPressed(.up)) params.cutoff *= 1.1;
-        // if (rl.isKeyPressed(.down)) params.cutoff *= 0.9;
-        // params.cutoff = std.math.clamp(params.cutoff, 100.0, 5000.0);
-        //
-        // paramsPublish(params);
+        if (rl.isKeyPressed(.up)) {
+            const curr = getActiveTrack().synth.params.get(.cutoff);
+            std.debug.print("cutoff: {}\n", .{curr});
+            getActiveTrack().synth.params.set(.cutoff, curr * 1.1);
+        }
+        if (rl.isKeyPressed(.down)) {
+            const curr = getActiveTrack().synth.params.get(.cutoff);
+            std.debug.print("cutoff: {}\n", .{curr});
+            getActiveTrack().synth.params.set(.cutoff, curr * 0.9);
+        }
 
         if (rl.isKeyPressed(.x)) offset += 12;
         if (rl.isKeyPressed(.z)) offset -= 12;
