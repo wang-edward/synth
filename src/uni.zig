@@ -80,6 +80,8 @@ pub const Uni = struct {
 
     pub fn init(alloc: std.mem.Allocator, count: usize) !*Uni {
         const s = try alloc.create(Uni);
+        s.params = Params(UniParams).init(.{});
+        s.vt = .{ .process = Uni._process };
         s.voices = try alloc.alloc(*Voice, count);
         for (s.voices) |*v| v.* = try Voice.init(alloc, 0.0);
 
@@ -136,9 +138,6 @@ pub const Uni = struct {
                 .Off => {},
             }
         }
-    }
-    pub fn setLpfCutoff(self: *Uni, cutoff: f32) void {
-        for (self.voices) |v| v.setLpfCutoff(cutoff);
     }
     fn _process(p: *anyopaque, ctx: *audio.Context, out: []audio.Sample) void {
         var self: *Uni = @ptrCast(@alignCast(p));
