@@ -117,28 +117,16 @@ fn audioThreadMain() !void {
     // Build Graph A: osc1 -> lpf (low cutoff) -> adsr -> gain
     // "warm, filtered" sound
     graph_a_nodes[0] = .{ .osc = audio.Osc.init(440, .saw, &voice_state.osc1) };
-    graph_a_nodes[1] = .{ .lpf = .{
-        .params = audio.Lpf.init(1.0, 2.0, 800, &voice_state.lpf),
-        .input = 0,
-    } };
-    graph_a_nodes[2] = .{ .adsr = .{
-        .params = audio.Adsr.init(.{ .attack = 0.01, .decay = 0.1, .sustain = 0.7, .release = 0.3 }, &voice_state.adsr),
-        .input = 1,
-    } };
-    graph_a_nodes[3] = .{ .gain = .{ .params = audio.Gain.init(1.0), .input = 2 } };
+    graph_a_nodes[1] = .{ .lpf = audio.Lpf.init(0, 1.0, 2.0, 800, &voice_state.lpf) };
+    graph_a_nodes[2] = .{ .adsr = audio.Adsr.init(1, .{ .attack = 0.01, .decay = 0.1, .sustain = 0.7, .release = 0.3 }, &voice_state.adsr) };
+    graph_a_nodes[3] = .{ .gain = audio.Gain.init(2, 1.0) };
 
     // Build Graph B: osc1 -> lpf (high cutoff) -> adsr -> gain
     // "bright, open" sound - same state, different cutoff
     graph_b_nodes[0] = .{ .osc = audio.Osc.init(440, .saw, &voice_state.osc1) };
-    graph_b_nodes[1] = .{ .lpf = .{
-        .params = audio.Lpf.init(1.0, 2.0, 4000, &voice_state.lpf),
-        .input = 0,
-    } };
-    graph_b_nodes[2] = .{ .adsr = .{
-        .params = audio.Adsr.init(.{ .attack = 0.01, .decay = 0.1, .sustain = 0.7, .release = 0.3 }, &voice_state.adsr),
-        .input = 1,
-    } };
-    graph_b_nodes[3] = .{ .gain = .{ .params = audio.Gain.init(1.0), .input = 2 } };
+    graph_b_nodes[1] = .{ .lpf = audio.Lpf.init(0, 1.0, 2.0, 4000, &voice_state.lpf) };
+    graph_b_nodes[2] = .{ .adsr = audio.Adsr.init(1, .{ .attack = 0.01, .decay = 0.1, .sustain = 0.7, .release = 0.3 }, &voice_state.adsr) };
+    graph_b_nodes[3] = .{ .gain = audio.Gain.init(2, 1.0) };
 
     dbl_graph = audio.DoubleBufferedGraph.init(&voice_state);
     dbl_graph.setGraph(0, .{ .nodes = &graph_a_nodes, .output = 3 });

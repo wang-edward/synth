@@ -66,13 +66,14 @@ pub const Lpf = struct {
         tV: [4]f32 = .{ 0, 0, 0, 0 },
     };
 
+    input: u16,
     drive: f32,
     resonance: f32,
     cutoff: f32,
     state: *State,
 
-    pub fn init(drive: f32, resonance: f32, cutoff: f32, state: *State) Lpf {
-        return .{ .drive = drive, .resonance = resonance, .cutoff = cutoff, .state = state };
+    pub fn init(input: u16, drive: f32, resonance: f32, cutoff: f32, state: *State) Lpf {
+        return .{ .input = input, .drive = drive, .resonance = resonance, .cutoff = cutoff, .state = state };
     }
 
     pub fn process(self: *Lpf, ctx: *Context, in: []const Sample, out: []Sample) void {
@@ -131,11 +132,22 @@ pub const Adsr = struct {
         }
     };
 
-    params: Params,
+    input: u16,
+    attack: f32,
+    decay: f32,
+    sustain: f32,
+    release: f32,
     state: *State,
 
-    pub fn init(params: Params, state: *State) Adsr {
-        return .{ .params = params, .state = state };
+    pub fn init(input: u16, params: Params, state: *State) Adsr {
+        return .{
+            .input = input,
+            .attack = params.attack,
+            .decay = params.decay,
+            .sustain = params.sustain,
+            .release = params.release,
+            .state = state,
+        };
     }
 
     pub fn process(self: *Adsr, ctx: *Context, in: []const Sample, out: []Sample) void {
@@ -150,22 +162,22 @@ pub const Adsr = struct {
             switch (st.stage) {
                 .idle => st.value = 0.0,
                 .attack => {
-                    st.value += 1.0 / (self.params.attack * sr);
+                    st.value += 1.0 / (self.attack * sr);
                     if (st.value >= 1.0) {
                         st.value = 1.0;
                         st.stage = .decay;
                     }
                 },
                 .decay => {
-                    st.value -= (1.0 - self.params.sustain) / (self.params.decay * sr);
-                    if (st.value <= self.params.sustain) {
-                        st.value = self.params.sustain;
+                    st.value -= (1.0 - self.sustain) / (self.decay * sr);
+                    if (st.value <= self.sustain) {
+                        st.value = self.sustain;
                         st.stage = .sustain;
                     }
                 },
                 .sustain => {},
                 .release => {
-                    st.value -= self.params.sustain / (self.params.release * sr);
+                    st.value -= self.sustain / (self.release * sr);
                     if (st.value <= 0.0) {
                         st.value = 0.0;
                         st.stage = .idle;
@@ -178,13 +190,14 @@ pub const Adsr = struct {
 };
 
 // =============================================================================
-// Gain - stateless, just processes samples
+// Gain - stateless
 // =============================================================================
 pub const Gain = struct {
+    input: u16,
     gain: f32,
 
-    pub fn init(g: f32) Gain {
-        return .{ .gain = g };
+    pub fn init(input: u16, g: f32) Gain {
+        return .{ .input = input, .gain = g };
     }
 
     pub fn process(self: *Gain, in: []const Sample, out: []Sample) void {
@@ -193,14 +206,26 @@ pub const Gain = struct {
 };
 
 // =============================================================================
-// Graph node - tagged union representing any node type with its inputs
+// Mixer - stateless, sums multiple inputs with gains
+// =============================================================================
+pub const Mixer = struct {
+    inputs: []const u16,
+    gains: []const f32,
+
+    pub fn init(inputs: []const u16, gains: []const f32) Mixer {
+        return .{ .inputs = inputs, .gains = gains };
+    }
+};
+
+// =============================================================================
+// Graph node - flattened tagged union
 // =============================================================================
 pub const Node = union(enum) {
     osc: Osc,
-    lpf: struct { params: Lpf, input: u16 },
-    adsr: struct { params: Adsr, input: u16 },
-    gain: struct { params: Gain, input: u16 },
-    mixer: struct { inputs: []const u16, gains: []const f32 },
+    lpf: Lpf,
+    adsr: Adsr,
+    gain: Gain,
+    mixer: Mixer,
 };
 
 // =============================================================================
@@ -220,17 +245,17 @@ pub const Graph = struct {
             .lpf => |*lpf| {
                 const tmp = ctx.tmp().alloc(Sample, out.len) catch unreachable;
                 self.processNode(ctx, lpf.input, tmp);
-                lpf.params.process(ctx, tmp, out);
+                lpf.process(ctx, tmp, out);
             },
             .adsr => |*adsr| {
                 const tmp = ctx.tmp().alloc(Sample, out.len) catch unreachable;
                 self.processNode(ctx, adsr.input, tmp);
-                adsr.params.process(ctx, tmp, out);
+                adsr.process(ctx, tmp, out);
             },
             .gain => |*g| {
                 const tmp = ctx.tmp().alloc(Sample, out.len) catch unreachable;
                 self.processNode(ctx, g.input, tmp);
-                g.params.process(tmp, out);
+                g.process(tmp, out);
             },
             .mixer => |mix| {
                 @memset(out, 0);
