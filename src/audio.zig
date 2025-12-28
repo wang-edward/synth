@@ -3,7 +3,7 @@ const std = @import("std");
 pub const Sample = f32;
 
 const ProcessFn = *const fn (self: *anyopaque, ctx: *Context, out: []Sample) void;
-const VTable = struct { process: ProcessFn };
+pub const VTable = struct { process: ProcessFn };
 pub const Node = struct { ptr: *anyopaque, v: *const VTable };
 
 pub const Context = struct {
