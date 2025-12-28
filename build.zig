@@ -77,10 +77,12 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "raylib", .module = raylib },
+                .{ .name = "soundio", .module = soundio_mod },
             },
         }),
     });
     double_graph.linkLibrary(raylib_artifact);
+    double_graph.linkLibrary(soundio_artifact);
     double_graph.linkLibC();
     b.installArtifact(double_graph);
     const run_cmd_double_graph = b.addRunArtifact(double_graph);
