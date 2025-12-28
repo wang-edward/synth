@@ -1,8 +1,8 @@
 const std = @import("std");
 const rl = @import("raylib");
 
-const WIDTH = 128;
-const HEIGHT = 128;
+pub const WIDTH = 128;
+pub const HEIGHT = 128;
 
 var target: rl.RenderTexture2D = undefined;
 
