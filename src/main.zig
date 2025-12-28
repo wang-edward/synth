@@ -319,6 +319,7 @@ pub fn main() !void {
             rl.drawText("A-L: play notes", 2, 2, 10, .white);
             rl.drawText("Z/X: change octave", 2, 14, 10, .white);
 
+            rl.drawCircle(64, 64, 10, rl.Color.red);
             rl.drawRectangleLines(0, 0, 128, 128, rl.Color.purple);
         }
     }
