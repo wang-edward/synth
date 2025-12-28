@@ -72,6 +72,11 @@ pub const Uni = struct {
     mixer: *audio.Mixer,
     next_idx: usize = 0,
 
+    params: Params,
+    pub const Params = struct {
+        cutoff: std.atomic.Value(f32) = .init(5000),
+    };
+
     pub fn init(alloc: std.mem.Allocator, count: usize) !*Uni {
         const s = try alloc.create(Uni);
         s.voices = try alloc.alloc(*Voice, count);
