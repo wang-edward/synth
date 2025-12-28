@@ -5,26 +5,23 @@ pub const PlaybackOp = union(enum) {
     Seek: u64,
 };
 
-pub const ParamId = union(enum) {
-    Lpf: LpfParam,
+pub const ParamType = union(enum) {
+    Uni: UniParam,
 };
 
-pub const LpfParam = enum {
-    Drive,
-    Resonance,
+pub const UniParam = enum {
     Cutoff,
 };
 
-pub const ParamOp = struct {
+pub const InstrParamOp = struct {
     track_id: usize,
-    plugin_id: usize,
-    id: ParamId,
+    id: ParamType,
     value: f32,
 };
 
 pub const Op = union(enum) {
     Playback: PlaybackOp,
-    Param: ParamOp,
+    InstrParam: InstrParamOp,
 };
 
 pub const OpQueue = SpscQueue(Op, 32);
