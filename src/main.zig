@@ -9,14 +9,6 @@ const ops = @import("ops.zig");
 const interface = @import("interface.zig");
 const project = @import("project.zig");
 
-// const SharedParams = struct {
-//     drive: f32 = 1.0,
-//     resonance: f32 = 1.0,
-//     cutoff: f32 = 4000.0,
-// };
-//
-// var g_params_slots: [2]SharedParams = .{ .{}, .{} }; // front/back
-// var g_params_idx = std.atomic.Value(u8).init(0); // index of *current* (front) slot
 var g_note_queue: midi.NoteQueue = .{};
 var g_playhead: u64 = 0;
 var g_playing: bool = false;
@@ -27,19 +19,6 @@ var g_active_track: usize = 0;
 inline fn getActiveTrack() *project.Track {
     return &g_timeline.tracks[g_active_track];
 }
-
-// inline fn paramsReadSnapshot() SharedParams {
-//     // Audio thread: acquire to see a consistent published slot
-//     const i = g_params_idx.load(.acquire);
-//     return g_params_slots[i]; // copy to a local snapshot (small POD copy)
-// }
-//
-// inline fn paramsPublish(newp: SharedParams) void {
-//     const r = g_params_idx.load(.acquire);
-//     const w = r ^ 1; // back slot
-//     g_params_slots[w] = newp; // copy the whole struct
-//     g_params_idx.store(w, .release);
-// }
 
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 const A = gpa.allocator();
@@ -78,10 +57,6 @@ fn write_callback(
     const outstream: *c.SoundIoOutStream = &maybe_outstream.?[0];
     const layout = &outstream.layout;
     const chans: usize = @intCast(layout.channel_count);
-
-    // Snapshot params once per callback
-    // const params = paramsReadSnapshot();
-    // leSynth.setLpfCutoff(params.cutoff); // TODO route Op to track
 
     var frames_left = max;
     var midi_notes: [midi.MAX_NOTES_PER_BLOCK]midi.NoteMsg = undefined;
@@ -290,9 +265,6 @@ pub fn main() !void {
         .k, .o, .l, .p, .semicolon, .apostrophe,
     };
 
-    // var params = SharedParams{};
-    // paramsPublish(params);
-
     var offset: i8 = 0;
     var key_state = std.AutoHashMap(rl.KeyboardKey, ?u8).init(A);
     defer key_state.deinit();
@@ -318,6 +290,8 @@ pub fn main() !void {
                 std.debug.print("key released {}\n", .{key});
             }
         }
+
+        if (rl.isKeyPressed(.up)) {}
 
         // if (rl.isKeyPressed(.up)) params.cutoff *= 1.1;
         // if (rl.isKeyPressed(.down)) params.cutoff *= 0.9;
