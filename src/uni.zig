@@ -1,5 +1,6 @@
 const std = @import("std");
 const audio = @import("audio.zig");
+const Params = @import("params.zig").Params;
 
 const NoteState = union(enum) {
     Off,
@@ -67,10 +68,15 @@ const Voice = struct {
 };
 
 pub const Uni = struct {
-    const SYNTH_TUNING: f32 = 440.0;
+    params: Params(UniParams),
     voices: []*Voice,
     mixer: *audio.Mixer,
+    vt: audio.VTable = .{ .process = Uni._process },
     next_idx: usize = 0,
+    const SYNTH_TUNING: f32 = 440.0;
+    const UniParams = struct {
+        cutoff: f32 = 5000.0,
+    };
 
     pub fn init(alloc: std.mem.Allocator, count: usize) !*Uni {
         const s = try alloc.create(Uni);
@@ -96,7 +102,7 @@ pub const Uni = struct {
         alloc.destroy(self);
     }
     pub fn asNode(self: *Uni) audio.Node {
-        return self.mixer.asNode();
+        return .{ .ptr = self, .v = &self.vt };
     }
     fn findFreeVoice(self: *Uni) ?*Voice {
         for (self.voices) |v| {
@@ -133,6 +139,15 @@ pub const Uni = struct {
     }
     pub fn setLpfCutoff(self: *Uni, cutoff: f32) void {
         for (self.voices) |v| v.setLpfCutoff(cutoff);
+    }
+    fn _process(p: *anyopaque, ctx: *audio.Context, out: []audio.Sample) void {
+        var self: *Uni = @ptrCast(@alignCast(p));
+        const params = self.params.snapshot();
+        for (self.voices) |v| {
+            v.lpf.cutoff = params.cutoff;
+        }
+        const mixer = self.mixer.asNode();
+        mixer.v.process(mixer.ptr, ctx, out);
     }
 };
 
