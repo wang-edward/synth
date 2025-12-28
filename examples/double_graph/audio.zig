@@ -23,12 +23,17 @@ pub const Context = struct {
 pub const Osc = struct {
     pub const State = struct {
         phase: f32 = 0,
+
+        pub fn reset(self: *State) void {
+            self.phase = 0;
+        }
     };
 
     pub const Kind = union(enum) {
         sine: void,
         saw: void,
-        square: struct { duty: f32 = 0.5 },
+        pwm: struct { duty: f32 = 0.5 },
+        sub: struct { duty: f32 = 0.5, offset: f32 = -12 },
     };
 
     freq: f32,
@@ -40,12 +45,17 @@ pub const Osc = struct {
     }
 
     pub fn process(self: *Osc, ctx: *Context, out: []Sample) void {
-        const inc = self.freq / ctx.sample_rate;
+        const base_inc = self.freq / ctx.sample_rate;
+        const inc = switch (self.kind) {
+            .sub => |sub| base_inc * std.math.exp2(sub.offset / 12.0),
+            else => base_inc,
+        };
         for (0..out.len) |i| {
             const sample: Sample = switch (self.kind) {
                 .sine => std.math.sin(self.state.phase * 2.0 * std.math.pi),
                 .saw => 2.0 * self.state.phase - 1.0,
-                .square => |sq| if (self.state.phase < sq.duty) @as(f32, 1.0) else @as(f32, -1.0),
+                .pwm => |pwm| if (self.state.phase < pwm.duty) @as(f32, 1.0) else @as(f32, -1.0),
+                .sub => |sub| if (self.state.phase < sub.duty) @as(f32, 1.0) else @as(f32, -1.0),
             };
             out[i] = sample;
             self.state.phase += inc;
@@ -129,6 +139,9 @@ pub const Adsr = struct {
         }
         pub fn noteOff(self: *State) void {
             if (self.stage != .idle) self.stage = .release;
+        }
+        pub fn isIdle(self: *State) bool {
+            return self.stage == .idle;
         }
     };
 
@@ -218,6 +231,119 @@ pub const Mixer = struct {
 };
 
 // =============================================================================
+// Distortion - stateless
+// =============================================================================
+pub const Distortion = struct {
+    pub const Mode = enum { hard, soft, tanh };
+
+    input: u16,
+    drive: f32,
+    mix: f32,
+    mode: Mode,
+
+    pub fn init(input: u16, drive: f32, mix: f32, mode: Mode) Distortion {
+        return .{ .input = input, .drive = drive, .mix = mix, .mode = mode };
+    }
+
+    fn shape(self: *const Distortion, x: Sample) Sample {
+        var y: f32 = x * self.drive;
+        switch (self.mode) {
+            .hard => {
+                if (y > 1.0) y = 1.0;
+                if (y < -1.0) y = -1.0;
+            },
+            .soft => {
+                const y3 = y * y * y;
+                y = y - (y3 * (1.0 / 3.0));
+            },
+            .tanh => {
+                y = std.math.tanh(y);
+            },
+        }
+        if (self.drive > 1.0) y /= self.drive;
+        return y;
+    }
+
+    pub fn process(self: *Distortion, in: []const Sample, out: []Sample) void {
+        for (out, in) |*o, x| {
+            const wet = self.shape(x);
+            o.* = x + (wet - x) * self.mix;
+        }
+    }
+};
+
+// =============================================================================
+// Gate - stateless (open/close is a param, not state)
+// =============================================================================
+pub const Gate = struct {
+    input: u16,
+    open: bool,
+
+    pub fn init(input: u16) Gate {
+        return .{ .input = input, .open = false };
+    }
+};
+
+// =============================================================================
+// Delay - has state (buffer + write position)
+// =============================================================================
+pub const Delay = struct {
+    pub const State = struct {
+        buffer: []Sample,
+        write_pos: usize = 0,
+
+        pub fn init(alloc: std.mem.Allocator, buffer_size: usize) !*State {
+            const s = try alloc.create(State);
+            s.buffer = try alloc.alloc(Sample, buffer_size);
+            s.write_pos = 0;
+            @memset(s.buffer, 0);
+            return s;
+        }
+
+        pub fn deinit(self: *State, alloc: std.mem.Allocator) void {
+            alloc.free(self.buffer);
+            alloc.destroy(self);
+        }
+    };
+
+    input: u16,
+    delay_time: f32,
+    feedback: f32,
+    mix: f32,
+    state: *State,
+
+    pub fn init(input: u16, delay_time: f32, feedback: f32, mix: f32, state: *State) Delay {
+        return .{
+            .input = input,
+            .delay_time = delay_time,
+            .feedback = feedback,
+            .mix = mix,
+            .state = state,
+        };
+    }
+
+    pub fn process(self: *Delay, ctx: *Context, in: []const Sample, out: []Sample) void {
+        const delay_samples = @as(usize, @intFromFloat(self.delay_time * ctx.sample_rate));
+        const buffer_len = self.state.buffer.len;
+        const st = self.state;
+
+        std.debug.assert(delay_samples < buffer_len);
+
+        for (out, in) |*o, dry| {
+            const read_pos = if (st.write_pos >= delay_samples)
+                st.write_pos - delay_samples
+            else
+                buffer_len - (delay_samples - st.write_pos);
+
+            const delayed = st.buffer[read_pos];
+            st.buffer[st.write_pos] = dry + (delayed * self.feedback);
+            o.* = dry * (1.0 - self.mix) + delayed * self.mix;
+            st.write_pos = (st.write_pos + 1) % buffer_len;
+        }
+    }
+};
+
+// =============================================================================
 // Graph node - flattened tagged union
 // =============================================================================
 pub const Node = union(enum) {
@@ -226,6 +352,9 @@ pub const Node = union(enum) {
     adsr: Adsr,
     gain: Gain,
     mixer: Mixer,
+    distortion: Distortion,
+    gate: Gate,
+    delay: Delay,
 };
 
 // =============================================================================
@@ -265,18 +394,42 @@ pub const Graph = struct {
                     for (out, tmp) |*o, x| o.* += x * gn;
                 }
             },
+            .distortion => |*dist| {
+                const tmp = ctx.tmp().alloc(Sample, out.len) catch unreachable;
+                self.processNode(ctx, dist.input, tmp);
+                dist.process(tmp, out);
+            },
+            .gate => |*g| {
+                if (!g.open) {
+                    @memset(out, 0);
+                    return;
+                }
+                self.processNode(ctx, g.input, out);
+            },
+            .delay => |*d| {
+                const tmp = ctx.tmp().alloc(Sample, out.len) catch unreachable;
+                self.processNode(ctx, d.input, tmp);
+                d.process(ctx, tmp, out);
+            },
         }
     }
 };
 
 // =============================================================================
-// SharedState - all accumulator state for a synth voice
+// VoiceState - all accumulator state for a single synth voice
 // =============================================================================
 pub const VoiceState = struct {
-    osc1: Osc.State = .{},
-    osc2: Osc.State = .{},
+    pwm: Osc.State = .{},
+    saw: Osc.State = .{},
+    sub: Osc.State = .{},
     lpf: Lpf.State = .{},
     adsr: Adsr.State = .{},
+
+    pub fn resetOscs(self: *VoiceState) void {
+        self.pwm.reset();
+        self.saw.reset();
+        self.sub.reset();
+    }
 };
 
 // =============================================================================
@@ -285,13 +438,11 @@ pub const VoiceState = struct {
 pub const DoubleBufferedGraph = struct {
     graphs: [2]Graph,
     active: std.atomic.Value(u8),
-    state: *VoiceState,
 
-    pub fn init(state: *VoiceState) DoubleBufferedGraph {
+    pub fn init() DoubleBufferedGraph {
         return .{
             .graphs = undefined,
             .active = std.atomic.Value(u8).init(0),
-            .state = state,
         };
     }
 
@@ -312,3 +463,12 @@ pub const DoubleBufferedGraph = struct {
         self.activeGraph().process(ctx, out);
     }
 };
+
+// =============================================================================
+// Utility
+// =============================================================================
+pub fn noteToFreq(note: u8) f32 {
+    const TUNING: f32 = 440.0;
+    const semitone_offset = @as(f32, @floatFromInt(@as(i16, @intCast(note)) - 69));
+    return TUNING * std.math.exp2(semitone_offset / 12.0);
+}

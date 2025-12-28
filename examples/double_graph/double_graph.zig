@@ -2,41 +2,34 @@ const std = @import("std");
 const rl = @import("raylib");
 const c = @cImport(@cInclude("soundio/soundio.h"));
 const audio = @import("audio.zig");
+const uni = @import("uni.zig");
+const queue = @import("queue.zig");
+const midi = @import("midi.zig");
+const ops = @import("ops.zig");
+const interface = @import("interface.zig");
+const project = @import("project.zig");
 
 // =============================================================================
-// Demo: Double-buffered audio graph
-//
-// This demonstrates swapping between two different graph topologies while
-// maintaining continuous oscillator phase and filter state. Press SPACE to
-// swap between graphs. The phase continuity proves the state separation works.
+// Global state
 // =============================================================================
+var g_note_queue: midi.NoteQueue = .{};
+var g_playhead: u64 = 0;
+var g_playing: bool = false;
+var g_timeline: project.Timeline = undefined;
+var g_op_queue: ops.OpQueue = .{};
+var g_active_track: usize = 0;
+
+inline fn getActiveTrack() *project.Track {
+    return &g_timeline.tracks[g_active_track];
+}
 
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 const A = gpa.allocator();
 
 // Scratch allocator for audio callback
-var scratch_mem: [256 * 1024]u8 = undefined;
+var scratch_mem: [512 * 1024]u8 = undefined;
 var scratch_fba = std.heap.FixedBufferAllocator.init(&scratch_mem);
 var context: audio.Context = undefined;
-
-// Shared voice state - persists across graph swaps
-var voice_state: audio.VoiceState = .{};
-
-// Graph storage - we'll build nodes into these arrays
-var graph_a_nodes: [4]audio.Node = undefined;
-var graph_b_nodes: [4]audio.Node = undefined;
-
-// Double-buffered graph
-var dbl_graph: audio.DoubleBufferedGraph = undefined;
-
-// Control: which graph is shown (for UI display)
-var g_active_label = std.atomic.Value(u8).init(0);
-
-// Oscillator frequency control
-var g_freq = std.atomic.Value(u32).init(440);
-
-// Note on/off
-var g_note_on = std.atomic.Value(bool).init(false);
 
 // libsoundio
 var sio: ?*c.SoundIo = null;
@@ -54,48 +47,62 @@ fn write_callback(
     max: c_int,
 ) callconv(.c) void {
     if (!g_run_audio.load(.acquire)) return;
+
     _ = _min;
     const outstream: *c.SoundIoOutStream = &maybe_outstream.?[0];
     const layout = &outstream.layout;
     const chans: usize = @intCast(layout.channel_count);
 
-    // Update frequency in active oscillators
-    const freq: f32 = @floatFromInt(g_freq.load(.acquire));
-    for (&graph_a_nodes) |*n| {
-        if (n.* == .osc) n.osc.freq = freq;
-    }
-    for (&graph_b_nodes) |*n| {
-        if (n.* == .osc) n.osc.freq = freq;
-    }
-
-    // Handle note on/off
-    if (g_note_on.load(.acquire)) {
-        if (voice_state.adsr.stage == .idle) {
-            voice_state.adsr.noteOn();
-        }
-    } else {
-        if (voice_state.adsr.stage != .idle and voice_state.adsr.stage != .release) {
-            voice_state.adsr.noteOff();
-        }
-    }
-
     var frames_left = max;
+    var midi_notes: [midi.MAX_NOTES_PER_BLOCK]midi.NoteMsg = undefined;
+
     scratch_fba = std.heap.FixedBufferAllocator.init(&scratch_mem);
     context.arena = std.heap.ArenaAllocator.init(scratch_fba.allocator());
 
     while (frames_left > 0) {
         var frame_count = frames_left;
+
         var areas: [*]c.SoundIoChannelArea = undefined;
         must(c.soundio_outstream_begin_write(maybe_outstream, @ptrCast(&areas), &frame_count));
         if (frame_count == 0) break;
 
+        // Process note queue
+        while (g_note_queue.pop()) |msg| {
+            switch (msg) {
+                .Off => |note| getActiveTrack().synth.noteOff(note),
+                .On => |note| getActiveTrack().synth.noteOn(note),
+            }
+        }
+
+        // Process ops
+        while (g_op_queue.pop()) |op| {
+            switch (op) {
+                .Playback => |p| switch (p) {
+                    .TogglePlay => {
+                        getActiveTrack().synth.allNotesOff();
+                        g_playing = !g_playing;
+                    },
+                    .Reset => {
+                        getActiveTrack().synth.allNotesOff();
+                        g_playhead = 0;
+                    },
+                    .Seek => |frame| {
+                        getActiveTrack().synth.allNotesOff();
+                        g_playhead = frame;
+                    },
+                },
+            }
+        }
+
+        // Render audio
         context.beginBlock();
         const mono = context.tmp().alloc(audio.Sample, @intCast(frame_count)) catch unreachable;
-        dbl_graph.process(&context, mono);
+        g_timeline.process(&context, mono);
 
+        // Copy to output channels
         var f: c_int = 0;
         while (f < frame_count) : (f += 1) {
-            const s = mono[@intCast(f)] * 0.3; // master volume
+            const s = mono[@intCast(f)];
             var ch: usize = 0;
             while (ch < chans) : (ch += 1) {
                 const step: usize = @intCast(areas[ch].step);
@@ -106,6 +113,22 @@ fn write_callback(
             }
         }
 
+        // Advance playhead
+        if (g_playing) {
+            const start = g_playhead;
+            g_playhead += @intCast(frame_count);
+
+            for (g_timeline.tracks) |*track| {
+                const n = track.player.advance(start, g_playhead, &midi_notes);
+                for (midi_notes[0..n]) |msg| {
+                    switch (msg) {
+                        .Off => |note| track.synth.noteOff(note),
+                        .On => |note| track.synth.noteOn(note),
+                    }
+                }
+            }
+        }
+
         frames_left -= frame_count;
         must(c.soundio_outstream_end_write(maybe_outstream));
     }
@@ -113,25 +136,10 @@ fn write_callback(
 
 fn underflow_callback(_: ?[*]c.SoundIoOutStream) callconv(.c) void {}
 
+// =============================================================================
+// Audio thread
+// =============================================================================
 fn audioThreadMain() !void {
-    // Build Graph A: osc1 -> lpf (low cutoff) -> adsr -> gain
-    // "warm, filtered" sound
-    graph_a_nodes[0] = .{ .osc = audio.Osc.init(440, .saw, &voice_state.osc1) };
-    graph_a_nodes[1] = .{ .lpf = audio.Lpf.init(0, 1.0, 2.0, 800, &voice_state.lpf) };
-    graph_a_nodes[2] = .{ .adsr = audio.Adsr.init(1, .{ .attack = 0.01, .decay = 0.1, .sustain = 0.7, .release = 0.3 }, &voice_state.adsr) };
-    graph_a_nodes[3] = .{ .gain = audio.Gain.init(2, 1.0) };
-
-    // Build Graph B: osc1 -> lpf (high cutoff) -> adsr -> gain
-    // "bright, open" sound - same state, different cutoff
-    graph_b_nodes[0] = .{ .osc = audio.Osc.init(440, .saw, &voice_state.osc1) };
-    graph_b_nodes[1] = .{ .lpf = audio.Lpf.init(0, 1.0, 2.0, 4000, &voice_state.lpf) };
-    graph_b_nodes[2] = .{ .adsr = audio.Adsr.init(1, .{ .attack = 0.01, .decay = 0.1, .sustain = 0.7, .release = 0.3 }, &voice_state.adsr) };
-    graph_b_nodes[3] = .{ .gain = audio.Gain.init(2, 1.0) };
-
-    dbl_graph = audio.DoubleBufferedGraph.init(&voice_state);
-    dbl_graph.setGraph(0, .{ .nodes = &graph_a_nodes, .output = 3 });
-    dbl_graph.setGraph(1, .{ .nodes = &graph_b_nodes, .output = 3 });
-
     // SoundIO setup
     sio = c.soundio_create();
     if (sio == null) return error.NoMem;
@@ -164,9 +172,66 @@ fn audioThreadMain() !void {
 
     must(c.soundio_outstream_start(out.?));
 
+    // Build timeline
+    const tempo: f32 = 120;
+    const notes = [_]midi.Note{
+        .{ .start = midi.beatsToFrames(0.0, tempo, sr), .end = midi.beatsToFrames(0.9, tempo, sr), .note = 60 },
+        .{ .start = midi.beatsToFrames(1.0, tempo, sr), .end = midi.beatsToFrames(1.9, tempo, sr), .note = 60 },
+        .{ .start = midi.beatsToFrames(2.0, tempo, sr), .end = midi.beatsToFrames(2.9, tempo, sr), .note = 67 },
+        .{ .start = midi.beatsToFrames(3.0, tempo, sr), .end = midi.beatsToFrames(3.9, tempo, sr), .note = 67 },
+        .{ .start = midi.beatsToFrames(4.0, tempo, sr), .end = midi.beatsToFrames(4.9, tempo, sr), .note = 69 },
+        .{ .start = midi.beatsToFrames(5.0, tempo, sr), .end = midi.beatsToFrames(5.9, tempo, sr), .note = 69 },
+        .{ .start = midi.beatsToFrames(6.0, tempo, sr), .end = midi.beatsToFrames(7.9, tempo, sr), .note = 67 },
+        .{ .start = midi.beatsToFrames(8.0, tempo, sr), .end = midi.beatsToFrames(8.9, tempo, sr), .note = 65 },
+        .{ .start = midi.beatsToFrames(9.0, tempo, sr), .end = midi.beatsToFrames(9.9, tempo, sr), .note = 65 },
+        .{ .start = midi.beatsToFrames(10.0, tempo, sr), .end = midi.beatsToFrames(10.9, tempo, sr), .note = 64 },
+        .{ .start = midi.beatsToFrames(11.0, tempo, sr), .end = midi.beatsToFrames(11.9, tempo, sr), .note = 64 },
+        .{ .start = midi.beatsToFrames(12.0, tempo, sr), .end = midi.beatsToFrames(12.9, tempo, sr), .note = 62 },
+        .{ .start = midi.beatsToFrames(13.0, tempo, sr), .end = midi.beatsToFrames(13.9, tempo, sr), .note = 62 },
+        .{ .start = midi.beatsToFrames(14.0, tempo, sr), .end = midi.beatsToFrames(15.9, tempo, sr), .note = 60 },
+    };
+    const bass_notes = [_]midi.Note{
+        .{ .start = midi.beatsToFrames(0.0, tempo, sr), .end = midi.beatsToFrames(2.0, tempo, sr), .note = 48 },
+        .{ .start = midi.beatsToFrames(2.0, tempo, sr), .end = midi.beatsToFrames(4.0, tempo, sr), .note = 48 },
+        .{ .start = midi.beatsToFrames(4.0, tempo, sr), .end = midi.beatsToFrames(6.0, tempo, sr), .note = 43 },
+        .{ .start = midi.beatsToFrames(6.0, tempo, sr), .end = midi.beatsToFrames(8.0, tempo, sr), .note = 43 },
+        .{ .start = midi.beatsToFrames(8.0, tempo, sr), .end = midi.beatsToFrames(10.0, tempo, sr), .note = 41 },
+        .{ .start = midi.beatsToFrames(10.0, tempo, sr), .end = midi.beatsToFrames(12.0, tempo, sr), .note = 40 },
+        .{ .start = midi.beatsToFrames(12.0, tempo, sr), .end = midi.beatsToFrames(14.0, tempo, sr), .note = 38 },
+        .{ .start = midi.beatsToFrames(14.0, tempo, sr), .end = midi.beatsToFrames(16.0, tempo, sr), .note = 36 },
+    };
+    const notes_per_track = [_][]const midi.Note{ &notes, &bass_notes };
+
+    g_timeline = try project.Timeline.init(A, 2, 4, &notes_per_track);
+    defer g_timeline.deinit(A);
+
     while (g_run_audio.load(.acquire)) {
         c.soundio_wait_events(sio);
     }
+}
+
+fn keyToMidi(key: rl.KeyboardKey) ?u8 {
+    return switch (key) {
+        .a => 48,
+        .s => 50,
+        .d => 52,
+        .f => 53,
+        .g => 55,
+        .h => 57,
+        .j => 59,
+        .k => 60,
+        .l => 62,
+        .semicolon => 64,
+        .apostrophe => 65,
+        .w => 49,
+        .e => 51,
+        .t => 54,
+        .y => 56,
+        .u => 58,
+        .o => 61,
+        .p => 63,
+        else => null,
+    };
 }
 
 pub fn main() !void {
@@ -179,64 +244,58 @@ pub fn main() !void {
         audio_thread.join();
     }
 
-    const w = 640;
-    const h = 400;
-    rl.initWindow(w, h, "Double-Buffered Audio Graph Demo");
-    defer rl.closeWindow();
-    rl.setTargetFPS(60);
+    try interface.init();
+    defer interface.deinit();
+
+    const note_keys = [_]rl.KeyboardKey{
+        .a, .w, .s, .e, .d,         .f,          .t, .g, .y, .h, .u, .j,
+        .k, .o, .l, .p, .semicolon, .apostrophe,
+    };
+
+    var offset: i8 = 0;
+    var key_state = std.AutoHashMap(rl.KeyboardKey, ?u8).init(A);
+    defer key_state.deinit();
+    for (note_keys) |k| try key_state.put(k, null);
 
     while (!rl.windowShouldClose()) {
-        // SPACE: swap graphs
-        if (rl.isKeyPressed(.space)) {
-            dbl_graph.swap();
-            const cur = g_active_label.load(.acquire);
-            g_active_label.store(cur ^ 1, .release);
+        for (note_keys) |key| {
+            const down = rl.isKeyDown(key);
+            const active_note = key_state.get(key).?;
+
+            if (down and active_note == null) {
+                if (keyToMidi(key)) |base| {
+                    const note: u8 = @intCast(@as(i16, base) + @as(i16, offset));
+                    while (!g_note_queue.push(.{ .On = note })) {}
+                    try key_state.put(key, note);
+                }
+            } else if (!down and active_note != null) {
+                while (!g_note_queue.push(.{ .Off = active_note.? })) {}
+                try key_state.put(key, null);
+            }
         }
 
-        // A key: note on/off
-        g_note_on.store(rl.isKeyDown(.a), .release);
-
-        // UP/DOWN: frequency
         if (rl.isKeyPressed(.up)) {
-            const f = g_freq.load(.acquire);
-            g_freq.store(@min(f + 50, 2000), .release);
+            const curr = getActiveTrack().synth.params.get(.cutoff);
+            getActiveTrack().synth.params.set(.cutoff, curr * 1.1);
         }
         if (rl.isKeyPressed(.down)) {
-            const f = g_freq.load(.acquire);
-            g_freq.store(@max(f -| 50, 100), .release);
+            const curr = getActiveTrack().synth.params.get(.cutoff);
+            getActiveTrack().synth.params.set(.cutoff, curr * 0.9);
         }
 
-        // Draw
-        rl.beginDrawing();
-        defer rl.endDrawing();
-        rl.clearBackground(.black);
+        if (rl.isKeyPressed(.x)) offset += 12;
+        if (rl.isKeyPressed(.z)) offset -= 12;
 
-        rl.drawText("Double-Buffered Audio Graph Demo", 20, 20, 24, .white);
-        rl.drawText("----------------------------------------", 20, 50, 16, .gray);
+        if (rl.isKeyPressed(.space)) {
+            while (!g_op_queue.push(.{ .Playback = .TogglePlay })) {}
+        }
 
-        const label = if (g_active_label.load(.acquire) == 0) "A (warm, low cutoff)" else "B (bright, high cutoff)";
-        var buf: [64]u8 = undefined;
-        const active_txt = std.fmt.bufPrintZ(&buf, "Active Graph: {s}", .{label}) catch "?";
-        rl.drawText(active_txt, 20, 80, 20, .green);
+        if (rl.isKeyPressed(.r)) {
+            while (!g_op_queue.push(.{ .Playback = .Reset })) {}
+        }
 
-        var buf2: [64]u8 = undefined;
-        const freq_txt = std.fmt.bufPrintZ(&buf2, "Frequency: {d} Hz", .{g_freq.load(.acquire)}) catch "?";
-        rl.drawText(freq_txt, 20, 110, 20, .yellow);
-
-        const phase_txt = std.fmt.bufPrintZ(&buf, "Osc Phase: {d:.3}", .{voice_state.osc1.phase}) catch "?";
-        rl.drawText(phase_txt, 20, 140, 20, .sky_blue);
-
-        var buf3: [64]u8 = undefined;
-        const env_txt = std.fmt.bufPrintZ(&buf3, "Envelope: {d:.2}", .{voice_state.adsr.value}) catch "?";
-        rl.drawText(env_txt, 20, 170, 20, .sky_blue);
-
-        rl.drawText("----------------------------------------", 20, 210, 16, .gray);
-        rl.drawText("Controls:", 20, 240, 18, .white);
-        rl.drawText("  SPACE  - Swap graph (A <-> B)", 20, 265, 16, .gray);
-        rl.drawText("  A key  - Hold to play note", 20, 285, 16, .gray);
-        rl.drawText("  UP/DOWN - Change frequency", 20, 305, 16, .gray);
-        rl.drawText("  ESC    - Quit", 20, 325, 16, .gray);
-
-        rl.drawText("Phase continuity proves state separation works!", 20, 360, 14, .dark_gray);
+        interface.preRender();
+        defer interface.postRender();
+        g_timeline.render();
     }
 }
