@@ -23,6 +23,10 @@ pub fn Params(comptime T: type) type {
 
         storage: AtomicStorage,
 
+        fn FieldType(comptime field: std.meta.FieldEnum(T)) type {
+            return std.meta.fields(T)[@intFromEnum(field)].type;
+        }
+
         // default values from T
         pub fn init(defaults: T) Self {
             var storage: AtomicStorage = undefined;
@@ -32,11 +36,11 @@ pub fn Params(comptime T: type) type {
             return .{ .storage = storage };
         }
 
-        pub fn set(self: *Self, comptime field: std.meta.FieldEnum(T), value: std.meta.FieldType(T, field)) void {
+        pub fn set(self: *Self, comptime field: std.meta.FieldEnum(T), value: FieldType(field)) void {
             @field(self.storage, @tagName(field)).store(value, .release);
         }
 
-        pub fn get(self: *Self, comptime field: std.meta.FieldEnum(T)) std.meta.FieldType(T, field) {
+        pub fn get(self: *Self, comptime field: std.meta.FieldEnum(T)) FieldType(field) {
             return @field(self.storage, @tagName(field)).load(.acquire);
         }
 
