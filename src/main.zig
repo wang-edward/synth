@@ -9,14 +9,6 @@ const ops = @import("ops.zig");
 const interface = @import("interface.zig");
 const project = @import("project.zig");
 
-// const SharedParams = struct {
-//     drive: f32 = 1.0,
-//     resonance: f32 = 1.0,
-//     cutoff: f32 = 4000.0,
-// };
-//
-// var g_params_slots: [2]SharedParams = .{ .{}, .{} }; // front/back
-// var g_params_idx = std.atomic.Value(u8).init(0); // index of *current* (front) slot
 var g_note_queue: midi.NoteQueue = .{};
 var g_playhead: u64 = 0;
 var g_playing: bool = false;
@@ -28,38 +20,24 @@ inline fn getActiveTrack() *project.Track {
     return &g_timeline.tracks[g_active_track];
 }
 
-// inline fn paramsReadSnapshot() SharedParams {
-//     // Audio thread: acquire to see a consistent published slot
-//     const i = g_params_idx.load(.acquire);
-//     return g_params_slots[i]; // copy to a local snapshot (small POD copy)
-// }
-//
-// inline fn paramsPublish(newp: SharedParams) void {
-//     const r = g_params_idx.load(.acquire);
-//     const w = r ^ 1; // back slot
-//     g_params_slots[w] = newp; // copy the whole struct
-//     g_params_idx.store(w, .release);
-// }
-
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 const A = gpa.allocator();
 
-// Scratch allocator for audio callback (no sys allocs in callback)
+// temp allocator for audio callback
 var scratch_mem: [512 * 1024]u8 = undefined;
 var scratch_fba = std.heap.FixedBufferAllocator.init(&scratch_mem);
 var context: audio.Context = undefined;
 
-// graph objects
 var root: audio.Node = undefined;
 
-// libsoundio state (used only on audio thread)
+// libsoundio
 var sio: ?*c.SoundIo = null;
 var out: ?*c.SoundIoOutStream = null;
 
 // shared sio pointer to allow main to kill sio
 var g_sio_ptr = std.atomic.Value(?*c.SoundIo).init(null);
 
-// Run flag for audio thread
+// run flag for audio thread
 var g_run_audio = std.atomic.Value(bool).init(true);
 
 fn must(ok: c_int) void {
@@ -78,10 +56,6 @@ fn write_callback(
     const outstream: *c.SoundIoOutStream = &maybe_outstream.?[0];
     const layout = &outstream.layout;
     const chans: usize = @intCast(layout.channel_count);
-
-    // Snapshot params once per callback
-    // const params = paramsReadSnapshot();
-    // leSynth.setLpfCutoff(params.cutoff); // TODO route Op to track
 
     var frames_left = max;
     var midi_notes: [midi.MAX_NOTES_PER_BLOCK]midi.NoteMsg = undefined;
@@ -126,12 +100,12 @@ fn write_callback(
             }
         }
 
-        // Render one block (mono) from the graph
+        // render one block (mono) from the graph
         context.beginBlock();
         const mono = context.tmp().alloc(audio.Sample, @intCast(frame_count)) catch unreachable;
         root.v.process(root.ptr, &context, mono);
 
-        // Fan-out mono -> all channels (non-interleaved areas)
+        // copy mono audio to all channels
         var f: c_int = 0;
         while (f < frame_count) : (f += 1) {
             const s = mono[@intCast(f)];
@@ -167,7 +141,7 @@ fn write_callback(
 }
 
 fn underflow_callback(_: ?[*]c.SoundIoOutStream) callconv(.c) void {
-    // avoid I/O here in production; okay to leave empty
+    unreachable;
 }
 
 // =============================== Audio thread entry ==================================
@@ -290,9 +264,6 @@ pub fn main() !void {
         .k, .o, .l, .p, .semicolon, .apostrophe,
     };
 
-    // var params = SharedParams{};
-    // paramsPublish(params);
-
     var offset: i8 = 0;
     var key_state = std.AutoHashMap(rl.KeyboardKey, ?u8).init(A);
     defer key_state.deinit();
@@ -348,13 +319,6 @@ pub fn main() !void {
             rl.drawText("A-L: play notes", 2, 2, 10, .white);
             rl.drawText("Z/X: change octave", 2, 14, 10, .white);
 
-            // var buf: [160]u8 = undefined;
-            // const line = std.fmt.bufPrintZ(
-            //     &buf,
-            //     "cutoff: {d:.0}, offset: {d:.0}",
-            //     .{ params.cutoff, @divTrunc(offset, 12) },
-            // ) catch "params";
-            // rl.drawText(line, 2, 26, 10, .white);
             rl.drawRectangleLines(0, 0, 128, 128, rl.Color.purple);
         }
     }
