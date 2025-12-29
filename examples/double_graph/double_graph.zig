@@ -126,17 +126,16 @@ fn underflow_callback(_: ?[*]c.SoundIoOutStream) callconv(.c) void {}
 fn audioThreadMain() !void {
     const adsr_params: audio.Adsr.Params = .{ .attack = 0.01, .decay = 0.1, .sustain = 0.7, .release = 0.3 };
 
-    // Build Graph A: osc -> lpf (low cutoff 800 Hz) -> adsr -> gain
-    // "warm, filtered" sound
+    // Build Graph A: osc -> lpf -> adsr -> gain
+    // Both graphs are identical so we can clearly hear when distortion is added
     osc_a = audio.Osc.init(440, .saw, &voice_state.osc1);
-    lpf_a = audio.Lpf.init(osc_a.asNode(), 1.0, 2.0, 800, &voice_state.lpf);
+    lpf_a = audio.Lpf.init(osc_a.asNode(), 1.0, 2.0, 2000, &voice_state.lpf);
     adsr_a = audio.Adsr.init(lpf_a.asNode(), adsr_params, &voice_state.adsr);
     gain_a = audio.Gain.init(adsr_a.asNode(), 1.0);
 
-    // Build Graph B: osc -> lpf (high cutoff 4000 Hz) -> adsr -> gain
-    // "bright, open" sound - same state, different cutoff
+    // Build Graph B: osc -> lpf -> adsr -> gain (identical to A)
     osc_b = audio.Osc.init(440, .saw, &voice_state.osc1);
-    lpf_b = audio.Lpf.init(osc_b.asNode(), 1.0, 2.0, 4000, &voice_state.lpf);
+    lpf_b = audio.Lpf.init(osc_b.asNode(), 1.0, 2.0, 2000, &voice_state.lpf);
     adsr_b = audio.Adsr.init(lpf_b.asNode(), adsr_params, &voice_state.adsr);
     gain_b = audio.Gain.init(adsr_b.asNode(), 1.0);
 
@@ -205,29 +204,39 @@ pub fn main() !void {
             g_active_label.store(cur ^ 1, .release);
         }
 
-        // D key: insert distortion into inactive graph, then swap
+        // D key: insert distortion into BOTH graphs to keep them in sync
         if (rl.isKeyPressed(.d)) {
-            const active = dbl_graph.active.load(.acquire);
-            const inactive = active ^ 1;
+            if (!has_dist_a or !has_dist_b) {
+                // First, modify the inactive graph
+                const active = dbl_graph.active.load(.acquire);
+                const inactive = active ^ 1;
 
-            if (inactive == 0 and !has_dist_a) {
-                // Rebuild graph A with distortion: osc -> lpf -> dist -> adsr -> gain
-                dist_a = audio.Distortion.init(lpf_a.asNode(), 30.0, 0.7, .soft);
-                adsr_a.input = dist_a.asNode();
-                dbl_graph.setOutput(0, gain_a.asNode());
-                has_dist_a = true;
-            } else if (inactive == 1 and !has_dist_b) {
-                // Rebuild graph B with distortion: osc -> lpf -> dist -> adsr -> gain
-                dist_b = audio.Distortion.init(lpf_b.asNode(), 30.0, 0.7, .soft);
-                adsr_b.input = dist_b.asNode();
-                dbl_graph.setOutput(1, gain_b.asNode());
-                has_dist_b = true;
+                if (inactive == 0 and !has_dist_a) {
+                    dist_a = audio.Distortion.init(lpf_a.asNode(), 30.0, 0.7, .soft);
+                    adsr_a.input = dist_a.asNode();
+                    has_dist_a = true;
+                } else if (inactive == 1 and !has_dist_b) {
+                    dist_b = audio.Distortion.init(lpf_b.asNode(), 30.0, 0.7, .soft);
+                    adsr_b.input = dist_b.asNode();
+                    has_dist_b = true;
+                }
+
+                // Swap so the modified graph is now active
+                dbl_graph.swap();
+
+                // Now modify the OTHER graph (previously active, now inactive)
+                // This is safe because audio thread is using the other one
+                if (!has_dist_a) {
+                    dist_a = audio.Distortion.init(lpf_a.asNode(), 30.0, 0.7, .soft);
+                    adsr_a.input = dist_a.asNode();
+                    has_dist_a = true;
+                }
+                if (!has_dist_b) {
+                    dist_b = audio.Distortion.init(lpf_b.asNode(), 30.0, 0.7, .soft);
+                    adsr_b.input = dist_b.asNode();
+                    has_dist_b = true;
+                }
             }
-
-            // Swap to the newly modified graph
-            dbl_graph.swap();
-            const cur = g_active_label.load(.acquire);
-            g_active_label.store(cur ^ 1, .release);
         }
 
         // A key: note on/off
@@ -251,7 +260,7 @@ pub fn main() !void {
         rl.drawText("Double-Buffered Audio Graph Demo", 20, 20, 24, .white);
         rl.drawText("----------------------------------------", 20, 50, 16, .gray);
 
-        const label = if (g_active_label.load(.acquire) == 0) "A (warm, low cutoff)" else "B (bright, high cutoff)";
+        const label = if (g_active_label.load(.acquire) == 0) "A" else "B";
         var buf: [64]u8 = undefined;
         const active_txt = std.fmt.bufPrintZ(&buf, "Active Graph: {s}", .{label}) catch "?";
         rl.drawText(active_txt, 20, 80, 20, .green);
