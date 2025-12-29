@@ -4,7 +4,7 @@ const c = @cImport(@cInclude("soundio/soundio.h"));
 const audio = @import("audio.zig");
 
 // =============================================================================
-// Demo: Double-buffered audio graph
+// Demo: Double-buffered audio graph with pointer-based nodes
 //
 // This demonstrates swapping between two different graph topologies while
 // maintaining continuous oscillator phase and filter state. Press SPACE to
@@ -22,9 +22,17 @@ var context: audio.Context = undefined;
 // Shared voice state - persists across graph swaps
 var voice_state: audio.VoiceState = .{};
 
-// Graph storage - we'll build nodes into these arrays
-var graph_a_nodes: [4]audio.Node = undefined;
-var graph_b_nodes: [4]audio.Node = undefined;
+// Graph A nodes: osc -> lpf (low cutoff) -> adsr -> gain
+var osc_a: audio.Osc = undefined;
+var lpf_a: audio.Lpf = undefined;
+var adsr_a: audio.Adsr = undefined;
+var gain_a: audio.Gain = undefined;
+
+// Graph B nodes: osc -> lpf (high cutoff) -> adsr -> gain
+var osc_b: audio.Osc = undefined;
+var lpf_b: audio.Lpf = undefined;
+var adsr_b: audio.Adsr = undefined;
+var gain_b: audio.Gain = undefined;
 
 // Double-buffered graph
 var dbl_graph: audio.DoubleBufferedGraph = undefined;
@@ -59,14 +67,10 @@ fn write_callback(
     const layout = &outstream.layout;
     const chans: usize = @intCast(layout.channel_count);
 
-    // Update frequency in active oscillators
+    // Update frequency in both graphs' oscillators
     const freq: f32 = @floatFromInt(g_freq.load(.acquire));
-    for (&graph_a_nodes) |*n| {
-        if (n.* == .osc) n.osc.freq = freq;
-    }
-    for (&graph_b_nodes) |*n| {
-        if (n.* == .osc) n.osc.freq = freq;
-    }
+    osc_a.freq = freq;
+    osc_b.freq = freq;
 
     // Handle note on/off
     if (g_note_on.load(.acquire)) {
@@ -114,23 +118,25 @@ fn write_callback(
 fn underflow_callback(_: ?[*]c.SoundIoOutStream) callconv(.c) void {}
 
 fn audioThreadMain() !void {
-    // Build Graph A: osc1 -> lpf (low cutoff) -> adsr -> gain
-    // "warm, filtered" sound
-    graph_a_nodes[0] = .{ .osc = audio.Osc.init(440, .saw, &voice_state.osc1) };
-    graph_a_nodes[1] = .{ .lpf = audio.Lpf.init(0, 1.0, 2.0, 800, &voice_state.lpf) };
-    graph_a_nodes[2] = .{ .adsr = audio.Adsr.init(1, .{ .attack = 0.01, .decay = 0.1, .sustain = 0.7, .release = 0.3 }, &voice_state.adsr) };
-    graph_a_nodes[3] = .{ .gain = audio.Gain.init(2, 1.0) };
+    const adsr_params: audio.Adsr.Params = .{ .attack = 0.01, .decay = 0.1, .sustain = 0.7, .release = 0.3 };
 
-    // Build Graph B: osc1 -> lpf (high cutoff) -> adsr -> gain
+    // Build Graph A: osc -> lpf (low cutoff 800 Hz) -> adsr -> gain
+    // "warm, filtered" sound
+    osc_a = audio.Osc.init(440, .saw, &voice_state.osc1);
+    lpf_a = audio.Lpf.init(osc_a.asNode(), 1.0, 2.0, 800, &voice_state.lpf);
+    adsr_a = audio.Adsr.init(lpf_a.asNode(), adsr_params, &voice_state.adsr);
+    gain_a = audio.Gain.init(adsr_a.asNode(), 1.0);
+
+    // Build Graph B: osc -> lpf (high cutoff 4000 Hz) -> adsr -> gain
     // "bright, open" sound - same state, different cutoff
-    graph_b_nodes[0] = .{ .osc = audio.Osc.init(440, .saw, &voice_state.osc1) };
-    graph_b_nodes[1] = .{ .lpf = audio.Lpf.init(0, 1.0, 2.0, 4000, &voice_state.lpf) };
-    graph_b_nodes[2] = .{ .adsr = audio.Adsr.init(1, .{ .attack = 0.01, .decay = 0.1, .sustain = 0.7, .release = 0.3 }, &voice_state.adsr) };
-    graph_b_nodes[3] = .{ .gain = audio.Gain.init(2, 1.0) };
+    osc_b = audio.Osc.init(440, .saw, &voice_state.osc1);
+    lpf_b = audio.Lpf.init(osc_b.asNode(), 1.0, 2.0, 4000, &voice_state.lpf);
+    adsr_b = audio.Adsr.init(lpf_b.asNode(), adsr_params, &voice_state.adsr);
+    gain_b = audio.Gain.init(adsr_b.asNode(), 1.0);
 
     dbl_graph = audio.DoubleBufferedGraph.init(&voice_state);
-    dbl_graph.setGraph(0, .{ .nodes = &graph_a_nodes, .output = 3 });
-    dbl_graph.setGraph(1, .{ .nodes = &graph_b_nodes, .output = 3 });
+    dbl_graph.setOutput(0, gain_a.asNode());
+    dbl_graph.setOutput(1, gain_b.asNode());
 
     // SoundIO setup
     sio = c.soundio_create();

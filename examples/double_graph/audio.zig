@@ -2,6 +2,13 @@ const std = @import("std");
 
 pub const Sample = f32;
 
+// =============================================================================
+// VTable pattern - matches src/audio.zig
+// =============================================================================
+const ProcessFn = *const fn (self: *anyopaque, ctx: *Context, out: []Sample) void;
+pub const VTable = struct { process: ProcessFn };
+pub const Node = struct { ptr: *anyopaque, v: *const VTable };
+
 pub const Context = struct {
     sample_rate: f32,
     arena: std.heap.ArenaAllocator,
@@ -34,12 +41,14 @@ pub const Osc = struct {
     freq: f32,
     kind: Kind,
     state: *State,
+    vt: VTable = .{ .process = _process },
 
     pub fn init(freq: f32, kind: Kind, state: *State) Osc {
         return .{ .freq = freq, .kind = kind, .state = state };
     }
 
-    pub fn process(self: *Osc, ctx: *Context, out: []Sample) void {
+    fn _process(p: *anyopaque, ctx: *Context, out: []Sample) void {
+        const self: *Osc = @ptrCast(@alignCast(p));
         const inc = self.freq / ctx.sample_rate;
         for (0..out.len) |i| {
             const sample: Sample = switch (self.kind) {
@@ -51,6 +60,10 @@ pub const Osc = struct {
             self.state.phase += inc;
             while (self.state.phase >= 1.0) self.state.phase -= 1.0;
         }
+    }
+
+    pub fn asNode(self: *Osc) Node {
+        return .{ .ptr = self, .v = &self.vt };
     }
 };
 
@@ -66,17 +79,22 @@ pub const Lpf = struct {
         tV: [4]f32 = .{ 0, 0, 0, 0 },
     };
 
-    input: u16,
+    input: Node,
     drive: f32,
     resonance: f32,
     cutoff: f32,
     state: *State,
+    vt: VTable = .{ .process = _process },
 
-    pub fn init(input: u16, drive: f32, resonance: f32, cutoff: f32, state: *State) Lpf {
+    pub fn init(input: Node, drive: f32, resonance: f32, cutoff: f32, state: *State) Lpf {
         return .{ .input = input, .drive = drive, .resonance = resonance, .cutoff = cutoff, .state = state };
     }
 
-    pub fn process(self: *Lpf, ctx: *Context, in: []const Sample, out: []Sample) void {
+    fn _process(p: *anyopaque, ctx: *Context, out: []Sample) void {
+        const self: *Lpf = @ptrCast(@alignCast(p));
+        const in = ctx.tmp().alloc(Sample, out.len) catch unreachable;
+        self.input.v.process(self.input.ptr, ctx, in);
+
         const x = (std.math.pi * self.cutoff) / ctx.sample_rate;
         const g = 4.0 * std.math.pi * THERMAL_VOLTAGE * self.cutoff * (1.0 - x) / (1.0 + x);
         const st = self.state;
@@ -105,6 +123,10 @@ pub const Lpf = struct {
             out[i] = st.V[3];
         }
     }
+
+    pub fn asNode(self: *Lpf) Node {
+        return .{ .ptr = self, .v = &self.vt };
+    }
 };
 
 // =============================================================================
@@ -132,14 +154,15 @@ pub const Adsr = struct {
         }
     };
 
-    input: u16,
+    input: Node,
     attack: f32,
     decay: f32,
     sustain: f32,
     release: f32,
     state: *State,
+    vt: VTable = .{ .process = _process },
 
-    pub fn init(input: u16, params: Params, state: *State) Adsr {
+    pub fn init(input: Node, params: Params, state: *State) Adsr {
         return .{
             .input = input,
             .attack = params.attack,
@@ -150,15 +173,20 @@ pub const Adsr = struct {
         };
     }
 
-    pub fn process(self: *Adsr, ctx: *Context, in: []const Sample, out: []Sample) void {
+    fn _process(p: *anyopaque, ctx: *Context, out: []Sample) void {
+        const self: *Adsr = @ptrCast(@alignCast(p));
         const st = self.state;
+
         if (st.stage == .idle) {
             @memset(out, 0);
             return;
         }
 
+        const tmp = ctx.tmp().alloc(Sample, out.len) catch unreachable;
+        self.input.v.process(self.input.ptr, ctx, tmp);
+
         const sr = ctx.sample_rate;
-        for (out, in) |*o, x| {
+        for (out, tmp) |*o, x| {
             switch (st.stage) {
                 .idle => st.value = 0.0,
                 .attack => {
@@ -187,90 +215,65 @@ pub const Adsr = struct {
             o.* = x * st.value;
         }
     }
+
+    pub fn asNode(self: *Adsr) Node {
+        return .{ .ptr = self, .v = &self.vt };
+    }
 };
 
 // =============================================================================
 // Gain - stateless
 // =============================================================================
 pub const Gain = struct {
-    input: u16,
+    input: Node,
     gain: f32,
+    vt: VTable = .{ .process = _process },
 
-    pub fn init(input: u16, g: f32) Gain {
+    pub fn init(input: Node, g: f32) Gain {
         return .{ .input = input, .gain = g };
     }
 
-    pub fn process(self: *Gain, in: []const Sample, out: []Sample) void {
-        for (out, in) |*o, x| o.* = x * self.gain;
+    fn _process(p: *anyopaque, ctx: *Context, out: []Sample) void {
+        const self: *Gain = @ptrCast(@alignCast(p));
+        const tmp = ctx.tmp().alloc(Sample, out.len) catch unreachable;
+        self.input.v.process(self.input.ptr, ctx, tmp);
+        for (out, tmp) |*o, x| o.* = x * self.gain;
+    }
+
+    pub fn asNode(self: *Gain) Node {
+        return .{ .ptr = self, .v = &self.vt };
     }
 };
 
 // =============================================================================
-// Mixer - stateless, sums multiple inputs with gains
+// Mixer - stateless, sums multiple inputs
 // =============================================================================
 pub const Mixer = struct {
-    inputs: []const u16,
-    gains: []const f32,
+    inputs: []const Node,
+    vt: VTable = .{ .process = _process },
 
-    pub fn init(inputs: []const u16, gains: []const f32) Mixer {
-        return .{ .inputs = inputs, .gains = gains };
-    }
-};
-
-// =============================================================================
-// Graph node - flattened tagged union
-// =============================================================================
-pub const Node = union(enum) {
-    osc: Osc,
-    lpf: Lpf,
-    adsr: Adsr,
-    gain: Gain,
-    mixer: Mixer,
-};
-
-// =============================================================================
-// Graph - array of nodes with process traversal
-// =============================================================================
-pub const Graph = struct {
-    nodes: []Node,
-    output: u16,
-
-    pub fn process(self: *Graph, ctx: *Context, out: []Sample) void {
-        self.processNode(ctx, self.output, out);
+    pub fn init(inputs: []const Node) Mixer {
+        return .{ .inputs = inputs };
     }
 
-    fn processNode(self: *Graph, ctx: *Context, idx: u16, out: []Sample) void {
-        switch (self.nodes[idx]) {
-            .osc => |*osc| osc.process(ctx, out),
-            .lpf => |*lpf| {
-                const tmp = ctx.tmp().alloc(Sample, out.len) catch unreachable;
-                self.processNode(ctx, lpf.input, tmp);
-                lpf.process(ctx, tmp, out);
-            },
-            .adsr => |*adsr| {
-                const tmp = ctx.tmp().alloc(Sample, out.len) catch unreachable;
-                self.processNode(ctx, adsr.input, tmp);
-                adsr.process(ctx, tmp, out);
-            },
-            .gain => |*g| {
-                const tmp = ctx.tmp().alloc(Sample, out.len) catch unreachable;
-                self.processNode(ctx, g.input, tmp);
-                g.process(tmp, out);
-            },
-            .mixer => |mix| {
-                @memset(out, 0);
-                for (mix.inputs, mix.gains) |inp, gn| {
-                    const tmp = ctx.tmp().alloc(Sample, out.len) catch unreachable;
-                    self.processNode(ctx, inp, tmp);
-                    for (out, tmp) |*o, x| o.* += x * gn;
-                }
-            },
+    fn _process(p: *anyopaque, ctx: *Context, out: []Sample) void {
+        const self: *Mixer = @ptrCast(@alignCast(p));
+        @memset(out, 0);
+
+        for (self.inputs) |n| {
+            const tmp = ctx.tmp().alloc(Sample, out.len) catch unreachable;
+            n.v.process(n.ptr, ctx, tmp);
+            for (out, tmp) |*o, x| o.* += x;
         }
     }
+
+    pub fn asNode(self: *Mixer) Node {
+        return .{ .ptr = self, .v = &self.vt };
+    }
 };
 
 // =============================================================================
-// SharedState - all accumulator state for a synth voice
+// VoiceState - all accumulator state for a synth voice
 // =============================================================================
 pub const VoiceState = struct {
     osc1: Osc.State = .{},
@@ -281,26 +284,27 @@ pub const VoiceState = struct {
 
 // =============================================================================
 // DoubleBufferedGraph - two graphs, atomic swap, shared state
+// Uses Node pointers (output node) instead of index arrays
 // =============================================================================
 pub const DoubleBufferedGraph = struct {
-    graphs: [2]Graph,
+    outputs: [2]Node,
     active: std.atomic.Value(u8),
     state: *VoiceState,
 
     pub fn init(state: *VoiceState) DoubleBufferedGraph {
         return .{
-            .graphs = undefined,
+            .outputs = undefined,
             .active = std.atomic.Value(u8).init(0),
             .state = state,
         };
     }
 
-    pub fn setGraph(self: *DoubleBufferedGraph, idx: u8, graph: Graph) void {
-        self.graphs[idx] = graph;
+    pub fn setOutput(self: *DoubleBufferedGraph, idx: u8, output: Node) void {
+        self.outputs[idx] = output;
     }
 
-    pub fn activeGraph(self: *DoubleBufferedGraph) *Graph {
-        return &self.graphs[self.active.load(.acquire)];
+    pub fn activeOutput(self: *DoubleBufferedGraph) Node {
+        return self.outputs[self.active.load(.acquire)];
     }
 
     pub fn swap(self: *DoubleBufferedGraph) void {
@@ -309,6 +313,7 @@ pub const DoubleBufferedGraph = struct {
     }
 
     pub fn process(self: *DoubleBufferedGraph, ctx: *Context, out: []Sample) void {
-        self.activeGraph().process(ctx, out);
+        const output = self.activeOutput();
+        output.v.process(output.ptr, ctx, out);
     }
 };
