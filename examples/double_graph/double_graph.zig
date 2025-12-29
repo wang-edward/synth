@@ -212,13 +212,13 @@ pub fn main() !void {
 
             if (inactive == 0 and !has_dist_a) {
                 // Rebuild graph A with distortion: osc -> lpf -> dist -> adsr -> gain
-                dist_a = audio.Distortion.init(lpf_a.asNode(), 3.0, 0.7, .soft);
+                dist_a = audio.Distortion.init(lpf_a.asNode(), 30.0, 0.7, .soft);
                 adsr_a.input = dist_a.asNode();
                 dbl_graph.setOutput(0, gain_a.asNode());
                 has_dist_a = true;
             } else if (inactive == 1 and !has_dist_b) {
                 // Rebuild graph B with distortion: osc -> lpf -> dist -> adsr -> gain
-                dist_b = audio.Distortion.init(lpf_b.asNode(), 3.0, 0.7, .soft);
+                dist_b = audio.Distortion.init(lpf_b.asNode(), 30.0, 0.7, .soft);
                 adsr_b.input = dist_b.asNode();
                 dbl_graph.setOutput(1, gain_b.asNode());
                 has_dist_b = true;
