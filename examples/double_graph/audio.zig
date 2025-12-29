@@ -2,9 +2,6 @@ const std = @import("std");
 
 pub const Sample = f32;
 
-// =============================================================================
-// VTable pattern - matches src/audio.zig
-// =============================================================================
 const ProcessFn = *const fn (self: *anyopaque, ctx: *Context, out: []Sample) void;
 pub const VTable = struct { process: ProcessFn };
 pub const Node = struct { ptr: *anyopaque, v: *const VTable };
@@ -24,9 +21,6 @@ pub const Context = struct {
     }
 };
 
-// =============================================================================
-// Oscillator - state separated from params
-// =============================================================================
 pub const Osc = struct {
     pub const State = struct {
         phase: f32 = 0,
@@ -67,9 +61,6 @@ pub const Osc = struct {
     }
 };
 
-// =============================================================================
-// Low-pass filter (Moog ladder) - state separated from params
-// =============================================================================
 pub const Lpf = struct {
     pub const THERMAL_VOLTAGE = 0.312;
 
@@ -129,9 +120,6 @@ pub const Lpf = struct {
     }
 };
 
-// =============================================================================
-// ADSR envelope - state separated from params
-// =============================================================================
 pub const Adsr = struct {
     pub const Params = struct {
         attack: f32,
@@ -221,9 +209,6 @@ pub const Adsr = struct {
     }
 };
 
-// =============================================================================
-// Gain - stateless
-// =============================================================================
 pub const Gain = struct {
     input: Node,
     gain: f32,
@@ -245,9 +230,6 @@ pub const Gain = struct {
     }
 };
 
-// =============================================================================
-// Distortion - stateless
-// =============================================================================
 pub const Distortion = struct {
     pub const Mode = enum { hard, soft, tanh };
 
@@ -296,9 +278,6 @@ pub const Distortion = struct {
     }
 };
 
-// =============================================================================
-// Mixer - stateless, sums multiple inputs
-// =============================================================================
 pub const Mixer = struct {
     inputs: []const Node,
     vt: VTable = .{ .process = _process },
@@ -323,9 +302,6 @@ pub const Mixer = struct {
     }
 };
 
-// =============================================================================
-// VoiceState - all accumulator state for a synth voice
-// =============================================================================
 pub const VoiceState = struct {
     osc1: Osc.State = .{},
     osc2: Osc.State = .{},
@@ -333,9 +309,6 @@ pub const VoiceState = struct {
     adsr: Adsr.State = .{},
 };
 
-// =============================================================================
-// DoubleBufferedGraph - two graphs, atomic swap, shared state
-// Uses Node pointers (output node) instead of index arrays
 // =============================================================================
 pub const DoubleBufferedGraph = struct {
     outputs: [2]Node,
