@@ -246,6 +246,57 @@ pub const Gain = struct {
 };
 
 // =============================================================================
+// Distortion - stateless
+// =============================================================================
+pub const Distortion = struct {
+    pub const Mode = enum { hard, soft, tanh };
+
+    input: Node,
+    drive: f32,
+    mix: f32,
+    mode: Mode,
+    vt: VTable = .{ .process = _process },
+
+    pub fn init(input: Node, drive: f32, mix: f32, mode: Mode) Distortion {
+        return .{ .input = input, .drive = drive, .mix = mix, .mode = mode };
+    }
+
+    fn shape(self: *const Distortion, x: Sample) Sample {
+        var y: f32 = x * self.drive;
+        switch (self.mode) {
+            .hard => {
+                if (y > 1.0) y = 1.0;
+                if (y < -1.0) y = -1.0;
+            },
+            .soft => {
+                const y3 = y * y * y;
+                y = y - (y3 * (1.0 / 3.0));
+            },
+            .tanh => {
+                y = std.math.tanh(y);
+            },
+        }
+        if (self.drive > 1.0) y /= self.drive;
+        return y;
+    }
+
+    fn _process(p: *anyopaque, ctx: *Context, out: []Sample) void {
+        const self: *Distortion = @ptrCast(@alignCast(p));
+        const tmp = ctx.tmp().alloc(Sample, out.len) catch unreachable;
+        self.input.v.process(self.input.ptr, ctx, tmp);
+
+        for (out, tmp) |*o, x| {
+            const wet = self.shape(x);
+            o.* = x + (wet - x) * self.mix;
+        }
+    }
+
+    pub fn asNode(self: *Distortion) Node {
+        return .{ .ptr = self, .v = &self.vt };
+    }
+};
+
+// =============================================================================
 // Mixer - stateless, sums multiple inputs
 // =============================================================================
 pub const Mixer = struct {

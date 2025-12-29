@@ -22,17 +22,23 @@ var context: audio.Context = undefined;
 // Shared voice state - persists across graph swaps
 var voice_state: audio.VoiceState = .{};
 
-// Graph A nodes: osc -> lpf (low cutoff) -> adsr -> gain
+// Graph A nodes: osc -> lpf (low cutoff) -> [dist] -> adsr -> gain
 var osc_a: audio.Osc = undefined;
 var lpf_a: audio.Lpf = undefined;
+var dist_a: audio.Distortion = undefined;
 var adsr_a: audio.Adsr = undefined;
 var gain_a: audio.Gain = undefined;
 
-// Graph B nodes: osc -> lpf (high cutoff) -> adsr -> gain
+// Graph B nodes: osc -> lpf (high cutoff) -> [dist] -> adsr -> gain
 var osc_b: audio.Osc = undefined;
 var lpf_b: audio.Lpf = undefined;
+var dist_b: audio.Distortion = undefined;
 var adsr_b: audio.Adsr = undefined;
 var gain_b: audio.Gain = undefined;
+
+// Track if distortion has been added to each graph
+var has_dist_a: bool = false;
+var has_dist_b: bool = false;
 
 // Double-buffered graph
 var dbl_graph: audio.DoubleBufferedGraph = undefined;
@@ -199,6 +205,31 @@ pub fn main() !void {
             g_active_label.store(cur ^ 1, .release);
         }
 
+        // D key: insert distortion into inactive graph, then swap
+        if (rl.isKeyPressed(.d)) {
+            const active = dbl_graph.active.load(.acquire);
+            const inactive = active ^ 1;
+
+            if (inactive == 0 and !has_dist_a) {
+                // Rebuild graph A with distortion: osc -> lpf -> dist -> adsr -> gain
+                dist_a = audio.Distortion.init(lpf_a.asNode(), 3.0, 0.7, .soft);
+                adsr_a.input = dist_a.asNode();
+                dbl_graph.setOutput(0, gain_a.asNode());
+                has_dist_a = true;
+            } else if (inactive == 1 and !has_dist_b) {
+                // Rebuild graph B with distortion: osc -> lpf -> dist -> adsr -> gain
+                dist_b = audio.Distortion.init(lpf_b.asNode(), 3.0, 0.7, .soft);
+                adsr_b.input = dist_b.asNode();
+                dbl_graph.setOutput(1, gain_b.asNode());
+                has_dist_b = true;
+            }
+
+            // Swap to the newly modified graph
+            dbl_graph.swap();
+            const cur = g_active_label.load(.acquire);
+            g_active_label.store(cur ^ 1, .release);
+        }
+
         // A key: note on/off
         g_note_on.store(rl.isKeyDown(.a), .release);
 
@@ -236,13 +267,20 @@ pub fn main() !void {
         const env_txt = std.fmt.bufPrintZ(&buf3, "Envelope: {d:.2}", .{voice_state.adsr.value}) catch "?";
         rl.drawText(env_txt, 20, 170, 20, .sky_blue);
 
-        rl.drawText("----------------------------------------", 20, 210, 16, .gray);
-        rl.drawText("Controls:", 20, 240, 18, .white);
-        rl.drawText("  SPACE  - Swap graph (A <-> B)", 20, 265, 16, .gray);
-        rl.drawText("  A key  - Hold to play note", 20, 285, 16, .gray);
-        rl.drawText("  UP/DOWN - Change frequency", 20, 305, 16, .gray);
-        rl.drawText("  ESC    - Quit", 20, 325, 16, .gray);
+        const dist_status = if (g_active_label.load(.acquire) == 0)
+            (if (has_dist_a) "YES" else "no")
+        else
+            (if (has_dist_b) "YES" else "no");
+        var buf4: [64]u8 = undefined;
+        const dist_txt = std.fmt.bufPrintZ(&buf4, "Distortion: {s}", .{dist_status}) catch "?";
+        rl.drawText(dist_txt, 20, 200, 20, if ((g_active_label.load(.acquire) == 0 and has_dist_a) or (g_active_label.load(.acquire) == 1 and has_dist_b)) .orange else .gray);
 
-        rl.drawText("Phase continuity proves state separation works!", 20, 360, 14, .dark_gray);
+        rl.drawText("----------------------------------------", 20, 230, 16, .gray);
+        rl.drawText("Controls:", 20, 260, 18, .white);
+        rl.drawText("  SPACE  - Swap graph (A <-> B)", 20, 285, 16, .gray);
+        rl.drawText("  D key  - Add distortion to inactive, swap", 20, 305, 16, .gray);
+        rl.drawText("  A key  - Hold to play note", 20, 325, 16, .gray);
+        rl.drawText("  UP/DOWN - Change frequency", 20, 345, 16, .gray);
+        rl.drawText("  ESC    - Quit", 20, 365, 16, .gray);
     }
 }
