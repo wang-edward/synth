@@ -68,6 +68,28 @@ pub fn build(b: *std.Build) void {
     const run_step_demo = b.step("demo", "Run emulated graphics");
     run_step_demo.dependOn(&run_cmd_demo.step);
 
+    // double buffered audio graph demo
+    const double_graph = b.addExecutable(.{
+        .name = "double_graph",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/double_graph/double_graph.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "raylib", .module = raylib },
+                .{ .name = "soundio", .module = soundio_mod },
+            },
+        }),
+    });
+    double_graph.linkLibrary(raylib_artifact);
+    double_graph.linkLibrary(soundio_artifact);
+    double_graph.linkLibC();
+    b.installArtifact(double_graph);
+    const run_cmd_double_graph = b.addRunArtifact(double_graph);
+    if (b.args) |args| run_cmd_double_graph.addArgs(args);
+    const run_step_double_graph = b.step("double", "Run double buffered graph demo");
+    run_step_double_graph.dependOn(&run_cmd_double_graph.step);
+
     // test
     const queue_mod = b.createModule(.{
         .root_source_file = b.path("src/queue.zig"),
