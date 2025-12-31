@@ -8,29 +8,42 @@ const NoteState = union(enum) {
 };
 
 const Voice = struct {
+    // Node state (persists across graph swaps)
+    pwm_state: audio.Osc.State,
+    saw_state: audio.Osc.State,
+    sub_state: audio.Osc.State,
+    lpf_state: audio.Lpf.State,
+    adsr_state: audio.Adsr.State,
+
+    // Nodes (topology)
     pwm: audio.Osc,
     saw: audio.Osc,
     sub: audio.Osc,
-    // noise: audio.Noise, // TODO
     mixer: *audio.Mixer,
     lpf: audio.Lpf,
     adsr: audio.Adsr,
 
-    // TODO is notestate necessary if we have adsr?
-    // technically adsr.state == .Idle has the same meaning
-    // but then the caller has to reach deep into Voice
     noteState: NoteState = .Off,
 
     pub fn init(alloc: std.mem.Allocator, freq: f32) !*Voice {
         const v = try alloc.create(Voice);
-        v.pwm = audio.Osc.init(freq, .{ .pwm = .{} });
-        v.saw = audio.Osc.init(freq, .{ .saw = .{} });
-        v.sub = audio.Osc.init(freq, .{ .sub = .{} });
+
+        // Initialize state
+        v.pwm_state = .{};
+        v.saw_state = .{};
+        v.sub_state = .{};
+        v.lpf_state = .{};
+        v.adsr_state = .{};
+
+        // Initialize nodes with pointers to state
+        v.pwm = audio.Osc.init(freq, .{ .pwm = .{} }, &v.pwm_state);
+        v.saw = audio.Osc.init(freq, .{ .saw = .{} }, &v.saw_state);
+        v.sub = audio.Osc.init(freq, .{ .sub = .{} }, &v.sub_state);
         v.mixer = try audio.Mixer.init(alloc, &[_]audio.Node{
             v.pwm.asNode(), v.saw.asNode(), v.sub.asNode(),
         });
-        v.lpf = audio.Lpf.init(v.mixer.asNode(), 1.0, 0.5, 5000.0);
-        v.adsr = audio.Adsr.init(v.lpf.asNode(), .{ .attack = 0.01, .decay = 0.1, .sustain = 0.4, .release = 0.6 });
+        v.lpf = audio.Lpf.init(v.mixer.asNode(), 1.0, 0.5, 5000.0, &v.lpf_state);
+        v.adsr = audio.Adsr.init(v.lpf.asNode(), .{ .attack = 0.01, .decay = 0.1, .sustain = 0.4, .release = 0.6 }, &v.adsr_state);
         v.noteState = .Off;
         return v;
     }
