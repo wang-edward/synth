@@ -8,7 +8,7 @@ const rl = @import("raylib");
 pub const Timeline = struct {
     tracks: []Track,
     mixer: *audio.Mixer,
-
+    // TODO const tracks?
     pub fn init(
         alloc: std.mem.Allocator,
         num_tracks: usize,
@@ -24,14 +24,12 @@ pub const Timeline = struct {
                 notes_per_track[i],
             );
         }
-
         var nodes = try alloc.alloc(audio.Node, num_tracks);
         defer alloc.free(nodes);
         for (tracks, 0..) |*t, i| {
             nodes[i] = t.asNode();
         }
         const mixer = try audio.Mixer.init(alloc, nodes);
-
         return .{
             .tracks = tracks,
             .mixer = mixer,
