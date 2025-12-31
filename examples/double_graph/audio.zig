@@ -300,10 +300,6 @@ pub const Mixer = struct {
     pub fn asNode(self: *Mixer) Node {
         return .{ .ptr = self, .v = &self.vt };
     }
-
-    pub fn asNode(self: *Mixer) Node {
-        return .{ .ptr = self, .v = &self.vt };
-    }
 };
 
 pub const VoiceState = struct {
