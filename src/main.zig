@@ -312,6 +312,13 @@ pub fn main() !void {
             while (!g_op_queue.push(.{ .Playback = .Reset })) {}
         }
 
+        // D key: toggle distortion on active track
+        if (rl.isKeyPressed(.q)) {
+            getActiveTrack().toggleDistortion() catch |err| {
+                std.debug.print("Failed to toggle distortion: {}\n", .{err});
+            };
+        }
+
         // draw UI
         interface.preRender();
         defer interface.postRender();
