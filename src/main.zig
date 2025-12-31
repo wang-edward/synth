@@ -312,10 +312,20 @@ pub fn main() !void {
             while (!g_op_queue.push(.{ .Playback = .Reset })) {}
         }
 
-        // D key: toggle distortion on active track
-        if (rl.isKeyPressed(.q)) {
+        // 1: toggle LPF, 2: toggle Distortion, 3: toggle Delay
+        if (rl.isKeyPressed(.one)) {
+            getActiveTrack().toggleLpf() catch |err| {
+                std.debug.print("Failed to toggle LPF: {}\n", .{err});
+            };
+        }
+        if (rl.isKeyPressed(.two)) {
             getActiveTrack().toggleDistortion() catch |err| {
                 std.debug.print("Failed to toggle distortion: {}\n", .{err});
+            };
+        }
+        if (rl.isKeyPressed(.three)) {
+            getActiveTrack().toggleDelay() catch |err| {
+                std.debug.print("Failed to toggle delay: {}\n", .{err});
             };
         }
 

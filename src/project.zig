@@ -8,7 +8,7 @@ const rl = @import("raylib");
 pub const Timeline = struct {
     tracks: []Track,
     mixer: *audio.Mixer,
-    // TODO const tracks?
+
     pub fn init(
         alloc: std.mem.Allocator,
         num_tracks: usize,
@@ -38,7 +38,6 @@ pub const Timeline = struct {
     pub fn deinit(self: *Timeline, alloc: std.mem.Allocator) void {
         for (self.tracks) |*t| t.deinit(alloc);
         alloc.free(self.tracks);
-
         self.mixer.deinit(alloc);
         alloc.destroy(self.mixer);
     }
@@ -57,34 +56,40 @@ pub const Timeline = struct {
     }
 };
 
-// TODO autogen this
 pub const Plugin = union(enum) {
+    lpf: *audio.Lpf,
     distortion: *audio.Distortion,
-    gain: *audio.Gain,
     delay: *audio.Delay,
+    gain: *audio.Gain,
 
+    /// Deinit the plugin node only (not the state - state is owned by Track)
     pub fn deinit(self: Plugin, alloc: std.mem.Allocator) void {
         switch (self) {
+            .lpf => |p| alloc.destroy(p),
             .distortion => |p| alloc.destroy(p),
+            .delay => |p| alloc.destroy(p), // Don't free state - Track owns it
             .gain => |p| alloc.destroy(p),
-            .delay => |p| p.deinit(alloc),
         }
     }
     pub fn asNode(self: Plugin) audio.Node {
         return switch (self) {
+            .lpf => |p| p.asNode(),
             .distortion => |p| p.asNode(),
-            .gain => |p| p.asNode(),
             .delay => |p| p.asNode(),
+            .gain => |p| p.asNode(),
         };
     }
     pub fn setInput(self: Plugin, input: audio.Node) void {
         switch (self) {
+            .lpf => |p| p.input = input,
             .distortion => |p| p.input = input,
-            .gain => |p| p.input = input,
             .delay => |p| p.input = input,
+            .gain => |p| p.input = input,
         }
     }
 };
+
+pub const PluginTag = std.meta.Tag(Plugin);
 
 // chain is: input -> plugins[0] -> plugins[1] -> ... -> output
 pub const PluginChain = struct {
@@ -133,28 +138,20 @@ pub const PluginChain = struct {
         }
         self.len = 0;
     }
-    // create and append a distortion plugin
-    // TODO delete
-    pub fn addDistortion(self: *PluginChain, drive: f32, mix: f32, mode: audio.Distortion.Mode) !void {
-        const d = try self.alloc.create(audio.Distortion);
-        d.* = audio.Distortion.init(self.output(), drive, mix, mode);
-        self.append(.{ .distortion = d });
-    }
-    // check if chain has a distortion plugin
-    // TODO delete
-    pub fn hasDistortion(self: *const PluginChain) bool {
+
+    /// Check if chain has a plugin of the given type
+    pub fn hasPlugin(self: *const PluginChain, comptime tag: PluginTag) bool {
         for (self.plugins[0..self.len]) |p| {
-            if (p == .distortion) return true;
+            if (p == tag) return true;
         }
         return false;
     }
-    // remove the first distortion plugin found
-    // TODO delete
-    pub fn removeDistortion(self: *PluginChain) void {
+
+    /// Remove the first plugin of the given type
+    pub fn removePlugin(self: *PluginChain, comptime tag: PluginTag) void {
         for (0..self.len) |i| {
-            if (self.plugins[i] == .distortion) {
+            if (self.plugins[i] == tag) {
                 self.plugins[i].deinit(self.alloc);
-                // Shift remaining plugins down
                 for (i..self.len - 1) |j| {
                     self.plugins[j] = self.plugins[j + 1];
                 }
@@ -164,7 +161,7 @@ pub const PluginChain = struct {
             }
         }
     }
-    /// rewire all plugins after a removal
+
     fn rewire(self: *PluginChain) void {
         var prev = self.input;
         for (self.plugins[0..self.len]) |*p| {
@@ -179,9 +176,13 @@ pub const Track = struct {
     player: midi.Player,
     alloc: std.mem.Allocator,
 
-    // double-buffered plugin chains
+    // Double-buffered plugin chains
     chains: [2]PluginChain,
     active: std.atomic.Value(u8),
+
+    // State for stateful plugins (shared across both chains)
+    lpf_state: audio.Lpf.State,
+    delay_state: ?*audio.Delay.State,
 
     vt: audio.VTable = .{ .process = Track._process },
 
@@ -198,6 +199,8 @@ pub const Track = struct {
                 PluginChain.init(alloc, synth_node),
             },
             .active = std.atomic.Value(u8).init(0),
+            .lpf_state = .{},
+            .delay_state = null,
         };
     }
     pub fn deinit(self: *Track, alloc: std.mem.Allocator) void {
@@ -205,6 +208,9 @@ pub const Track = struct {
         self.player.deinit(alloc);
         self.chains[0].deinit();
         self.chains[1].deinit();
+        if (self.delay_state) |ds| {
+            ds.deinit(alloc);
+        }
     }
     fn _process(p: *anyopaque, ctx: *audio.Context, out: []audio.Sample) void {
         const self: *Track = @ptrCast(@alignCast(p));
@@ -215,22 +221,68 @@ pub const Track = struct {
     pub fn asNode(self: *Track) audio.Node {
         return .{ .ptr = self, .v = &self.vt };
     }
-    pub fn hasDistortion(self: *Track) bool {
-        return self.chains[self.active.load(.acquire)].hasDistortion();
-    }
-    // demo: toggle distortion using graph swap
-    pub fn toggleDistortion(self: *Track) !void {
+
+    /// Generic toggle using double-buffer swap pattern
+    fn togglePlugin(
+        self: *Track,
+        comptime tag: PluginTag,
+        createFn: fn (*Track, *PluginChain) anyerror!void,
+    ) !void {
         const active_idx = self.active.load(.acquire);
         const inactive_idx = active_idx ^ 1;
 
-        if (self.hasDistortion()) {
-            self.chains[inactive_idx].removeDistortion();
+        if (self.chains[active_idx].hasPlugin(tag)) {
+            // Remove from inactive, swap, remove from other
+            self.chains[inactive_idx].removePlugin(tag);
             self.active.store(inactive_idx, .release);
-            self.chains[active_idx].removeDistortion();
+            self.chains[active_idx].removePlugin(tag);
         } else {
-            try self.chains[inactive_idx].addDistortion(8.0, 0.7, .soft);
+            // Add to inactive, swap, add to other
+            try createFn(self, &self.chains[inactive_idx]);
             self.active.store(inactive_idx, .release);
-            try self.chains[active_idx].addDistortion(8.0, 0.7, .soft);
+            try createFn(self, &self.chains[active_idx]);
         }
+    }
+
+    fn createLpf(self: *Track, chain: *PluginChain) !void {
+        const lpf = try self.alloc.create(audio.Lpf);
+        lpf.* = audio.Lpf.init(chain.output(), 1.0, 2.0, 2000.0, &self.lpf_state);
+        chain.append(.{ .lpf = lpf });
+    }
+
+    fn createDistortion(_: *Track, chain: *PluginChain) !void {
+        const dist = try chain.alloc.create(audio.Distortion);
+        dist.* = audio.Distortion.init(chain.output(), 8.0, 0.7, .soft);
+        chain.append(.{ .distortion = dist });
+    }
+
+    fn createDelay(self: *Track, chain: *PluginChain) !void {
+        // Create shared state if it doesn't exist
+        if (self.delay_state == null) {
+            self.delay_state = try audio.Delay.State.init(self.alloc, 48000 * 2); // 2 sec buffer
+        }
+        const delay = try self.alloc.create(audio.Delay);
+        delay.* = audio.Delay.init(chain.output(), 0.25, 0.4, 0.3, self.delay_state.?);
+        chain.append(.{ .delay = delay });
+    }
+
+    pub fn hasLpf(self: *Track) bool {
+        return self.chains[self.active.load(.acquire)].hasPlugin(.lpf);
+    }
+    pub fn hasDistortion(self: *Track) bool {
+        return self.chains[self.active.load(.acquire)].hasPlugin(.distortion);
+    }
+    pub fn hasDelay(self: *Track) bool {
+        return self.chains[self.active.load(.acquire)].hasPlugin(.delay);
+    }
+
+    pub fn toggleLpf(self: *Track) !void {
+        try self.togglePlugin(.lpf, createLpf);
+    }
+    pub fn toggleDistortion(self: *Track) !void {
+        try self.togglePlugin(.distortion, createDistortion);
+    }
+    pub fn toggleDelay(self: *Track) !void {
+        try self.togglePlugin(.delay, createDelay);
     }
 };
