@@ -8,7 +8,7 @@ const rl = @import("raylib");
 pub const Timeline = struct {
     tracks: []Track,
     mixer: *audio.Mixer,
-
+    // TODO const tracks?
     pub fn init(
         alloc: std.mem.Allocator,
         num_tracks: usize,
@@ -56,18 +56,18 @@ pub const Timeline = struct {
     }
 };
 
+// TODO autogen this
 pub const Plugin = union(enum) {
     lpf: *audio.Lpf,
     distortion: *audio.Distortion,
     delay: *audio.Delay,
     gain: *audio.Gain,
 
-    /// Deinit the plugin node only (not the state - state is owned by Track)
     pub fn deinit(self: Plugin, alloc: std.mem.Allocator) void {
         switch (self) {
             .lpf => |p| alloc.destroy(p),
             .distortion => |p| alloc.destroy(p),
-            .delay => |p| alloc.destroy(p), // Don't free state - Track owns it
+            .delay => |p| alloc.destroy(p),
             .gain => |p| alloc.destroy(p),
         }
     }
@@ -139,7 +139,7 @@ pub const PluginChain = struct {
         self.len = 0;
     }
 
-    /// Check if chain has a plugin of the given type
+    // TODO delete
     pub fn hasPlugin(self: *const PluginChain, comptime tag: PluginTag) bool {
         for (self.plugins[0..self.len]) |p| {
             if (p == tag) return true;
@@ -147,7 +147,8 @@ pub const PluginChain = struct {
         return false;
     }
 
-    /// Remove the first plugin of the given type
+    // remove first plugin of the given type
+    // TODO delete
     pub fn removePlugin(self: *PluginChain, comptime tag: PluginTag) void {
         for (0..self.len) |i| {
             if (self.plugins[i] == tag) {
@@ -176,11 +177,11 @@ pub const Track = struct {
     player: midi.Player,
     alloc: std.mem.Allocator,
 
-    // Double-buffered plugin chains
+    // double-buffered plugin chains
     chains: [2]PluginChain,
     active: std.atomic.Value(u8),
 
-    // State for stateful plugins (shared across both chains)
+    // state
     lpf_state: audio.Lpf.State,
     delay_state: ?*audio.Delay.State,
 
@@ -222,7 +223,6 @@ pub const Track = struct {
         return .{ .ptr = self, .v = &self.vt };
     }
 
-    /// Generic toggle using double-buffer swap pattern
     fn togglePlugin(
         self: *Track,
         comptime tag: PluginTag,
@@ -232,12 +232,10 @@ pub const Track = struct {
         const inactive_idx = active_idx ^ 1;
 
         if (self.chains[active_idx].hasPlugin(tag)) {
-            // Remove from inactive, swap, remove from other
             self.chains[inactive_idx].removePlugin(tag);
             self.active.store(inactive_idx, .release);
             self.chains[active_idx].removePlugin(tag);
         } else {
-            // Add to inactive, swap, add to other
             try createFn(self, &self.chains[inactive_idx]);
             self.active.store(inactive_idx, .release);
             try createFn(self, &self.chains[active_idx]);
@@ -257,9 +255,9 @@ pub const Track = struct {
     }
 
     fn createDelay(self: *Track, chain: *PluginChain) !void {
-        // Create shared state if it doesn't exist
+        // create shared state if it doesn't exist
         if (self.delay_state == null) {
-            self.delay_state = try audio.Delay.State.init(self.alloc, 48000 * 2); // 2 sec buffer
+            self.delay_state = try audio.Delay.State.init(self.alloc, 48_000 * 2); // 2 sec buffer
         }
         const delay = try self.alloc.create(audio.Delay);
         delay.* = audio.Delay.init(chain.output(), 0.25, 0.4, 0.3, self.delay_state.?);
