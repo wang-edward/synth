@@ -85,15 +85,21 @@ fn write_callback(
             switch (op) {
                 .Playback => |p| switch (p) {
                     .TogglePlay => {
-                        getActiveTrack().synth.allNotesOff();
+                        for (g_timeline.tracks) |t| {
+                            t.synth.allNotesOff();
+                        }
                         g_playing = !g_playing;
                     },
                     .Reset => {
-                        getActiveTrack().synth.allNotesOff();
+                        for (g_timeline.tracks) |t| {
+                            t.synth.allNotesOff();
+                        }
                         g_playhead = 0;
                     },
                     .Seek => |frame| {
-                        getActiveTrack().synth.allNotesOff();
+                        for (g_timeline.tracks) |t| {
+                            t.synth.allNotesOff();
+                        }
                         g_playhead = frame;
                     },
                 },
