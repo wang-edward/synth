@@ -23,10 +23,9 @@ pub const Context = struct {
 };
 
 pub const Osc = struct {
-    freq: f32,
-    phase: f32,
-    kind: Kind,
-    vt: VTable = .{ .process = Osc._process },
+    pub const State = struct {
+        phase: f32 = 0,
+    };
 
     pub const Kind = union(enum) {
         sine: struct {},
@@ -35,11 +34,17 @@ pub const Osc = struct {
         sub: struct { duty: f32 = 0.5, offset: f32 = -12 },
     };
 
-    pub fn init(freq: f32, kind: Kind) Osc {
-        return .{ .freq = freq, .phase = 0, .kind = kind };
+    freq: f32,
+    kind: Kind,
+    state: *State,
+    vt: VTable = .{ .process = Osc._process },
+
+    pub fn init(freq: f32, kind: Kind, state: *State) Osc {
+        return .{ .freq = freq, .kind = kind, .state = state };
     }
     fn _process(p: *anyopaque, ctx: *Context, out: []Sample) void {
-        var self: *Osc = @ptrCast(@alignCast(p));
+        const self: *Osc = @ptrCast(@alignCast(p));
+        const st = self.state;
         const base_inc = self.freq / ctx.sample_rate;
         const inc = switch (self.kind) {
             .sub => |sub| base_inc * std.math.exp2(sub.offset / 12.0),
@@ -47,21 +52,21 @@ pub const Osc = struct {
         };
         for (0..out.len) |i| {
             const sample: Sample = switch (self.kind) {
-                .sine => std.math.sin(self.phase * 2.0 * std.math.pi),
-                .pwm => |pwm| if (self.phase < pwm.duty) 1.0 else -1.0,
-                .saw => 2.0 * self.phase - 1.0,
-                .sub => |sub| if (self.phase < sub.duty) 1.0 else -1.0,
+                .sine => std.math.sin(st.phase * 2.0 * std.math.pi),
+                .pwm => |pwm| if (st.phase < pwm.duty) 1.0 else -1.0,
+                .saw => 2.0 * st.phase - 1.0,
+                .sub => |sub| if (st.phase < sub.duty) 1.0 else -1.0,
             };
             out[i] = @floatCast(sample);
-            self.phase += inc;
-            while (self.phase >= 1.0) self.phase -= 1.0;
+            st.phase += inc;
+            while (st.phase >= 1.0) st.phase -= 1.0;
         }
     }
     pub fn asNode(self: *Osc) Node {
         return .{ .ptr = self, .v = &self.vt };
     }
     pub fn resetPhase(self: *Osc) void {
-        self.phase = 0.0;
+        self.state.phase = 0.0;
     }
 };
 
@@ -69,51 +74,53 @@ pub const Lpf = struct {
     // References: "An Improved Virtual Analog Model of the Moog Ladder Filter"
     // Original Implementation: D'Angelo, Valimaki
     pub const THERMAL_VOLTAGE = 0.312;
+
+    pub const State = struct {
+        V: [4]f32 = .{ 0, 0, 0, 0 },
+        dV: [4]f32 = .{ 0, 0, 0, 0 },
+        tV: [4]f32 = .{ 0, 0, 0, 0 },
+    };
+
     input: Node,
-    V: [4]f32 = .{ 0, 0, 0, 0 },
-    dV: [4]f32 = .{ 0, 0, 0, 0 },
-    tV: [4]f32 = .{ 0, 0, 0, 0 },
     drive: f32,
     resonance: f32,
     cutoff: f32,
+    state: *State,
     vt: VTable = .{ .process = Lpf._process },
 
-    pub fn init(input: Node, drive: f32, resonance: f32, cutoff: f32) Lpf {
-        return .{ .input = input, .drive = drive, .resonance = resonance, .cutoff = cutoff };
+    pub fn init(input: Node, drive: f32, resonance: f32, cutoff: f32, state: *State) Lpf {
+        return .{ .input = input, .drive = drive, .resonance = resonance, .cutoff = cutoff, .state = state };
     }
     fn _process(p: *anyopaque, ctx: *Context, out: []Sample) void {
-        var self: *Lpf = @ptrCast(@alignCast(p));
+        const self: *Lpf = @ptrCast(@alignCast(p));
         const in = ctx.tmp().alloc(Sample, out.len) catch unreachable;
         self.input.v.process(self.input.ptr, ctx, in);
 
-        var dV0: f32 = undefined;
-        var dV1: f32 = undefined;
-        var dV2: f32 = undefined;
-        var dV3: f32 = undefined;
+        const st = self.state;
         const x = (std.math.pi * self.cutoff) / ctx.sample_rate;
         const g = 4.0 * std.math.pi * THERMAL_VOLTAGE * self.cutoff * (1.0 - x) / (1.0 + x);
         for (0..out.len) |i| {
-            dV0 = -g * (std.math.tanh((self.drive * in[i] + self.resonance * self.V[3] / (2.0 * THERMAL_VOLTAGE)) + self.tV[0]));
-            self.V[0] += (dV0 + self.dV[0]) / (2.0 * ctx.sample_rate);
-            self.dV[0] = dV0;
-            self.tV[0] = std.math.tanh(self.V[0] / (2.0 * THERMAL_VOLTAGE));
+            const dV0 = -g * (std.math.tanh((self.drive * in[i] + self.resonance * st.V[3] / (2.0 * THERMAL_VOLTAGE)) + st.tV[0]));
+            st.V[0] += (dV0 + st.dV[0]) / (2.0 * ctx.sample_rate);
+            st.dV[0] = dV0;
+            st.tV[0] = std.math.tanh(st.V[0] / (2.0 * THERMAL_VOLTAGE));
 
-            dV1 = g * (self.tV[0] - self.tV[1]);
-            self.V[1] += (dV1 + self.dV[1]) / (2.0 * ctx.sample_rate);
-            self.dV[1] = dV1;
-            self.tV[1] = std.math.tanh(self.V[1] / (2.0 * THERMAL_VOLTAGE));
+            const dV1 = g * (st.tV[0] - st.tV[1]);
+            st.V[1] += (dV1 + st.dV[1]) / (2.0 * ctx.sample_rate);
+            st.dV[1] = dV1;
+            st.tV[1] = std.math.tanh(st.V[1] / (2.0 * THERMAL_VOLTAGE));
 
-            dV2 = g * (self.tV[1] - self.tV[2]);
-            self.V[2] += (dV2 + self.dV[2]) / (2.0 * ctx.sample_rate);
-            self.dV[2] = dV2;
-            self.tV[2] = std.math.tanh(self.V[2] / (2.0 * THERMAL_VOLTAGE));
+            const dV2 = g * (st.tV[1] - st.tV[2]);
+            st.V[2] += (dV2 + st.dV[2]) / (2.0 * ctx.sample_rate);
+            st.dV[2] = dV2;
+            st.tV[2] = std.math.tanh(st.V[2] / (2.0 * THERMAL_VOLTAGE));
 
-            dV3 = g * (self.tV[2] - self.tV[3]);
-            self.V[3] += (dV3 + self.dV[3]) / (2.0 * ctx.sample_rate);
-            self.dV[3] = dV3;
-            self.tV[3] = std.math.tanh(self.V[3] / (2.0 * THERMAL_VOLTAGE));
+            const dV3 = g * (st.tV[2] - st.tV[3]);
+            st.V[3] += (dV3 + st.dV[3]) / (2.0 * ctx.sample_rate);
+            st.dV[3] = dV3;
+            st.tV[3] = std.math.tanh(st.V[3] / (2.0 * THERMAL_VOLTAGE));
 
-            out[i] = self.V[3];
+            out[i] = st.V[3];
         }
     }
     pub fn asNode(self: *Lpf) Node {
@@ -244,36 +251,50 @@ pub const Adsr = struct {
         sustain: f32,
         release: f32,
     };
-    const State = enum { Idle, Attack, Decay, Sustain, Release };
+
+    pub const Stage = enum { Idle, Attack, Decay, Sustain, Release };
+
+    pub const State = struct {
+        value: f32 = 0.0,
+        stage: Stage = .Idle,
+
+        pub fn noteOn(self: *State) void {
+            self.stage = .Attack;
+        }
+        pub fn noteOff(self: *State) void {
+            if (self.stage != .Idle) {
+                self.stage = .Release;
+            }
+        }
+    };
 
     input: Node,
     params: Params,
-    value: f32 = 0.0,
-    state: State = .Idle,
+    state: *State,
     vt: VTable = .{ .process = Adsr._process },
 
-    pub fn init(input: Node, params: Params) Adsr {
+    pub fn init(input: Node, params: Params, state: *State) Adsr {
         return .{
             .input = input,
             .params = params,
+            .state = state,
         };
     }
     pub fn asNode(self: *Adsr) Node {
         return .{ .ptr = self, .v = &self.vt };
     }
     pub fn noteOn(self: *Adsr) void {
-        self.state = .Attack;
+        self.state.noteOn();
     }
     pub fn noteOff(self: *Adsr) void {
-        if (self.state != .Idle) {
-            self.state = .Release;
-        }
+        self.state.noteOff();
     }
     fn _process(p: *anyopaque, ctx: *Context, out: []Sample) void {
-        var self: *Adsr = @ptrCast(@alignCast(p));
+        const self: *Adsr = @ptrCast(@alignCast(p));
+        const st = self.state;
 
         // short circuit dfs if idle
-        if (self.state == .Idle) {
+        if (st.stage == .Idle) {
             @memset(out, 0);
             return;
         }
@@ -283,85 +304,102 @@ pub const Adsr = struct {
 
         const sr = ctx.sample_rate;
         for (out, tmp) |*o, x| {
-            switch (self.state) {
-                .Idle => self.value = 0.0,
+            switch (st.stage) {
+                .Idle => st.value = 0.0,
                 .Attack => {
-                    self.value += 1.0 / (self.params.attack * sr);
-                    if (self.value >= 1.0) {
-                        self.value = 1.0;
-                        self.state = .Decay;
+                    st.value += 1.0 / (self.params.attack * sr);
+                    if (st.value >= 1.0) {
+                        st.value = 1.0;
+                        st.stage = .Decay;
                     }
                 },
                 .Decay => {
-                    self.value -= (1.0 - self.params.sustain) / (self.params.decay * sr);
-                    if (self.value <= self.params.sustain) {
-                        self.value = self.params.sustain;
-                        self.state = .Sustain;
+                    st.value -= (1.0 - self.params.sustain) / (self.params.decay * sr);
+                    if (st.value <= self.params.sustain) {
+                        st.value = self.params.sustain;
+                        st.stage = .Sustain;
                     }
                 },
                 .Sustain => {}, // hold
                 .Release => {
-                    self.value -= self.params.sustain / (self.params.release * sr);
-                    if (self.value <= 0.0) {
-                        self.value = 0.0;
-                        self.state = .Idle;
+                    st.value -= self.params.sustain / (self.params.release * sr);
+                    if (st.value <= 0.0) {
+                        st.value = 0.0;
+                        st.stage = .Idle;
                     }
                 },
             }
-            o.* = x * self.value;
+            o.* = x * st.value;
         }
     }
 };
 
 pub const Delay = struct {
+    pub const State = struct {
+        buffer: []Sample,
+        write_pos: usize = 0,
+
+        pub fn init(alloc: std.mem.Allocator, buffer_size: usize) !*State {
+            const s = try alloc.create(State);
+            s.* = .{
+                .buffer = try alloc.alloc(Sample, buffer_size),
+                .write_pos = 0,
+            };
+            @memset(s.buffer, 0);
+            return s;
+        }
+
+        pub fn deinit(self: *State, alloc: std.mem.Allocator) void {
+            alloc.free(self.buffer);
+            alloc.destroy(self);
+        }
+    };
+
     input: Node,
-    buffer: []Sample,
-    write_pos: usize = 0,
     delay_time: f32, // seconds
     feedback: f32,
     mix: f32, // [0.0, 1.0]
+    state: *State,
     vt: VTable = .{ .process = Delay._process },
 
-    pub fn init(a: std.mem.Allocator, input: Node, buffer_size: usize) !*Delay {
-        const d = try a.create(Delay);
-        d.* = .{
+    pub fn init(input: Node, delay_time: f32, feedback: f32, mix: f32, state: *State) Delay {
+        return .{
             .input = input,
-            .buffer = try a.alloc(Sample, buffer_size),
-            .delay_time = 0.25,
-            .feedback = 0.3,
-            .mix = 0.2,
+            .delay_time = delay_time,
+            .feedback = feedback,
+            .mix = mix,
+            .state = state,
         };
-        @memset(d.buffer, 0);
-        return d;
     }
 
     pub fn deinit(self: *Delay, alloc: std.mem.Allocator) void {
-        alloc.free(self.buffer);
+        self.state.deinit(alloc);
         alloc.destroy(self);
     }
 
     fn _process(p: *anyopaque, ctx: *Context, out: []Sample) void {
-        var self: *Delay = @ptrCast(@alignCast(p));
+        const self: *Delay = @ptrCast(@alignCast(p));
+        const st = self.state;
         const tmp = ctx.tmp().alloc(Sample, out.len) catch unreachable;
         self.input.v.process(self.input.ptr, ctx, tmp);
 
         const delay_samples = @as(usize, @intFromFloat(self.delay_time * ctx.sample_rate));
-        const buffer_len = self.buffer.len;
+        const buffer_len = st.buffer.len;
 
         std.debug.assert(delay_samples < buffer_len);
 
         for (out, tmp) |*o, dry| {
             // read from buffer
-            const read_pos = if (self.write_pos >= delay_samples)
-                self.write_pos - delay_samples
+            const read_pos = if (st.write_pos >= delay_samples)
+                st.write_pos - delay_samples
             else
-                buffer_len - (delay_samples - self.write_pos);
+                buffer_len - (delay_samples - st.write_pos);
 
-            const delayed = self.buffer[read_pos];
+            const delayed = st.buffer[read_pos];
 
-            self.buffer[self.write_pos] = dry + (delayed * self.feedback); // Write to buffer (input + feedback)
+            st.buffer[st.write_pos] = dry + (delayed * self.feedback); // Write to buffer (input + feedback)
             o.* = dry * (1.0 - self.mix) + delayed * self.mix; // mix
-            self.write_pos = (self.write_pos + 1) % buffer_len; // advance
+            st.write_pos = (st.write_pos + 1) % buffer_len; // advance
         }
     }
 
