@@ -112,7 +112,7 @@ fn write_callback(
                         for (g_timeline.tracks[0..g_timeline.track_count]) |t| {
                             t.synth.allNotesOff();
                         }
-                        // If recording and playing, stop both
+                        // if recording and playing, stop both
                         if (g_recording and g_playing) {
                             g_recording = false;
                             g_playing = false;
@@ -140,7 +140,7 @@ fn write_callback(
                 .Record => |r| switch (r) {
                     .ToggleRecord => |track_idx| {
                         if (g_recording) {
-                            // Stop recording: flush notes to track
+                            // stop recording: flush notes to track
                             if (g_record_buffer.items.len > 0) {
                                 g_timeline.tracks[track_idx].player.appendNotes(
                                     A,
@@ -152,14 +152,14 @@ fn write_callback(
                             g_held_notes = .{null} ** 128;
                             g_recording = false;
                             if (g_playing) g_playing = false;
-                            std.debug.print("recording stopped, flushed to track {}\n", .{track_idx});
+                            std.debug.print("recording stopped, playing stopped, flushed to track {}\n", .{track_idx});
                         } else if (!g_playing) {
-                            // Not playing and not recording: start both
+                            // not playing and not recording: start both
                             g_playing = true;
                             g_recording = true;
                             std.debug.print("started recording and playback on track {}\n", .{track_idx});
                         } else {
-                            // Playing but not recording: just start recording
+                            // nlaying but not recording: just start recording
                             g_recording = true;
                             std.debug.print("recording started on track {}\n", .{track_idx});
                         }
