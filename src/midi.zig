@@ -39,6 +39,13 @@ pub const Player = struct {
         alloc.free(self.notes);
         self.notes = &.{};
     }
+    pub fn appendNotes(self: *Player, alloc: std.mem.Allocator, new_notes: []const Note) !void {
+        const combined = try alloc.alloc(Note, self.notes.len + new_notes.len);
+        @memcpy(combined[0..self.notes.len], self.notes);
+        @memcpy(combined[self.notes.len..], new_notes);
+        alloc.free(self.notes);
+        self.notes = combined;
+    }
     pub fn advance(self: *Player, start: Frame, end: Frame, out: []NoteMsg) usize {
         // std.debug.print("start: {}, end: {}", .{ start, end });
         // std.debug.print("notes: {any}", .{self.notes});
