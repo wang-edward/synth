@@ -320,10 +320,12 @@ pub fn main() !void {
 
         // - / = : remove / add track
         if (rl.isKeyPressed(.minus)) {
-            g_timeline.removeTrack(g_timeline.track_count - 1);
+            g_timeline.removeTrack(g_active_track);
+            std.debug.print("removed track {}\n", .{g_active_track});
         }
         if (rl.isKeyPressed(.equal)) {
             g_timeline.addTrack() catch {};
+            std.debug.print("added track {}\n", .{g_timeline.track_count - 1});
         }
 
         // [ / ] : switch active track
