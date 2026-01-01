@@ -12,9 +12,14 @@ const project = @import("project.zig");
 var g_note_queue: midi.NoteQueue = .{};
 var g_playhead: u64 = 0;
 var g_playing: bool = false;
+var g_recording: bool = false;
 var g_timeline: project.Timeline = undefined;
 var g_op_queue: ops.OpQueue = .{};
 var g_active_track: usize = 0;
+
+// Recording state
+var g_held_notes: [128]?midi.Frame = .{null} ** 128; // note -> start frame
+var g_record_buffer: std.ArrayListUnmanaged(midi.Note) = .{};
 
 inline fn getActiveTrack() *project.Track {
     return &g_timeline.tracks[g_active_track];
@@ -74,8 +79,27 @@ fn write_callback(
         // process note
         while (g_note_queue.pop()) |msg| {
             switch (msg) {
-                .Off => |note| getActiveTrack().synth.noteOff(note),
-                .On => |note| getActiveTrack().synth.noteOn(note),
+                .Off => |note| {
+                    getActiveTrack().synth.noteOff(note);
+                    // Record note off
+                    if (g_recording and g_playing) {
+                        if (g_held_notes[note]) |start| {
+                            g_record_buffer.append(A, .{
+                                .start = start,
+                                .end = g_playhead,
+                                .note = note,
+                            }) catch {};
+                            g_held_notes[note] = null;
+                        }
+                    }
+                },
+                .On => |note| {
+                    getActiveTrack().synth.noteOn(note);
+                    // Record note on
+                    if (g_recording and g_playing) {
+                        g_held_notes[note] = g_playhead;
+                    }
+                },
             }
         }
 
@@ -88,7 +112,17 @@ fn write_callback(
                         for (g_timeline.tracks[0..g_timeline.track_count]) |t| {
                             t.synth.allNotesOff();
                         }
-                        g_playing = !g_playing;
+                        // If recording and playing, stop both
+                        if (g_recording and g_playing) {
+                            g_recording = false;
+                            g_playing = false;
+                            g_held_notes = .{null} ** 128;
+                            g_record_buffer.clearRetainingCapacity();
+                            std.debug.print("stopped recording and playback\n", .{});
+                        } else {
+                            g_playing = !g_playing;
+                            std.debug.print("playback: {s}\n", .{if (g_playing) "play" else "pause"});
+                        }
                     },
                     .Reset => {
                         for (g_timeline.tracks[0..g_timeline.track_count]) |t| {
@@ -101,6 +135,33 @@ fn write_callback(
                             t.synth.allNotesOff();
                         }
                         g_playhead = frame;
+                    },
+                },
+                .Record => |r| switch (r) {
+                    .ToggleRecord => |track_idx| {
+                        if (g_recording) {
+                            // Stop recording: flush notes to track
+                            if (g_record_buffer.items.len > 0) {
+                                g_timeline.tracks[track_idx].player.appendNotes(
+                                    A,
+                                    g_record_buffer.items,
+                                ) catch {};
+                                g_record_buffer.clearRetainingCapacity();
+                            }
+                            // Clear held notes
+                            g_held_notes = .{null} ** 128;
+                            g_recording = false;
+                            std.debug.print("recording stopped, flushed to track {}\n", .{track_idx});
+                        } else if (!g_playing) {
+                            // Not playing and not recording: start both
+                            g_playing = true;
+                            g_recording = true;
+                            std.debug.print("started recording and playback on track {}\n", .{track_idx});
+                        } else {
+                            // Playing but not recording: just start recording
+                            g_recording = true;
+                            std.debug.print("recording started on track {}\n", .{track_idx});
+                        }
                     },
                 },
             }
@@ -221,6 +282,8 @@ fn audioThreadMain() !void {
     defer g_timeline.deinit();
     root = g_timeline.asNode();
 
+    defer g_record_buffer.deinit(A);
+
     while (g_run_audio.load(.acquire)) {
         c.soundio_wait_events(sio);
     }
@@ -314,8 +377,13 @@ pub fn main() !void {
             while (!g_op_queue.push(.{ .Playback = .TogglePlay })) {}
         }
 
-        if (rl.isKeyPressed(.r)) {
+        if (rl.isKeyPressed(.backspace)) {
             while (!g_op_queue.push(.{ .Playback = .Reset })) {}
+        }
+
+        // r: toggle recording on active track
+        if (rl.isKeyPressed(.r)) {
+            while (!g_op_queue.push(.{ .Record = .{ .ToggleRecord = g_active_track } })) {}
         }
 
         // - / = : remove / add track
