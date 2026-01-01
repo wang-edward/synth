@@ -85,19 +85,19 @@ fn write_callback(
             switch (op) {
                 .Playback => |p| switch (p) {
                     .TogglePlay => {
-                        for (g_timeline.tracks) |t| {
+                        for (g_timeline.tracks[0..g_timeline.track_count]) |t| {
                             t.synth.allNotesOff();
                         }
                         g_playing = !g_playing;
                     },
                     .Reset => {
-                        for (g_timeline.tracks) |t| {
+                        for (g_timeline.tracks[0..g_timeline.track_count]) |t| {
                             t.synth.allNotesOff();
                         }
                         g_playhead = 0;
                     },
                     .Seek => |frame| {
-                        for (g_timeline.tracks) |t| {
+                        for (g_timeline.tracks[0..g_timeline.track_count]) |t| {
                             t.synth.allNotesOff();
                         }
                         g_playhead = frame;
@@ -130,7 +130,7 @@ fn write_callback(
             const start = g_playhead;
             g_playhead += @intCast(frame_count);
 
-            for (g_timeline.tracks) |*track| {
+            for (g_timeline.tracks[0..g_timeline.track_count]) |*track| {
                 const n = track.player.advance(start, g_playhead, &midi_notes);
                 for (midi_notes[0..n]) |msg| {
                     switch (msg) {
@@ -218,7 +218,7 @@ fn audioThreadMain() !void {
     const notes_per_track = [_][]const midi.Note{ &notes, &bass_notes };
 
     g_timeline = try project.Timeline.init(A, 2, 4, &notes_per_track);
-    defer g_timeline.deinit(A);
+    defer g_timeline.deinit();
     root = g_timeline.asNode();
 
     while (g_run_audio.load(.acquire)) {
@@ -316,6 +316,24 @@ pub fn main() !void {
 
         if (rl.isKeyPressed(.r)) {
             while (!g_op_queue.push(.{ .Playback = .Reset })) {}
+        }
+
+        // - / = : remove / add track
+        if (rl.isKeyPressed(.minus)) {
+            g_timeline.removeTrack(g_timeline.track_count - 1);
+        }
+        if (rl.isKeyPressed(.equal)) {
+            g_timeline.addTrack() catch {};
+        }
+
+        // [ / ] : switch active track
+        if (rl.isKeyPressed(.left_bracket)) {
+            if (g_active_track > 0) g_active_track -= 1;
+            std.debug.print("current track: {}\n", .{g_active_track});
+        }
+        if (rl.isKeyPressed(.right_bracket)) {
+            if (g_active_track < g_timeline.track_count - 1) g_active_track += 1;
+            std.debug.print("current track: {}\n", .{g_active_track});
         }
 
         // 1: toggle LPF, 2: toggle Distortion, 3: toggle Delay
