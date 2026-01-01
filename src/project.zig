@@ -6,43 +6,73 @@ const interface = @import("interface.zig");
 const rl = @import("raylib");
 
 pub const Timeline = struct {
-    tracks: []Track,
-    mixer: *audio.Mixer,
-    // TODO const tracks?
+    pub const MAX_TRACKS = 8;
+
+    alloc: std.mem.Allocator,
+    tracks: [MAX_TRACKS]Track,
+    track_count: usize,
+    vt: audio.VTable = .{ .process = _process },
+
     pub fn init(
         alloc: std.mem.Allocator,
         num_tracks: usize,
         voices_per_track: usize,
         notes_per_track: []const []const midi.Note,
     ) !Timeline {
+        std.debug.assert(num_tracks <= MAX_TRACKS);
         std.debug.assert(notes_per_track.len == num_tracks);
-        const tracks = try alloc.alloc(Track, num_tracks);
-        for (tracks, 0..) |*t, i| {
-            t.* = try Track.init(
-                alloc,
-                voices_per_track,
-                notes_per_track[i],
-            );
-        }
-        var nodes = try alloc.alloc(audio.Node, num_tracks);
-        defer alloc.free(nodes);
-        for (tracks, 0..) |*t, i| {
-            nodes[i] = t.asNode();
-        }
-        const mixer = try audio.Mixer.init(alloc, nodes);
-        return .{
-            .tracks = tracks,
-            .mixer = mixer,
+
+        var timeline: Timeline = .{
+            .alloc = alloc,
+            .tracks = undefined,
+            .track_count = num_tracks,
         };
+
+        // Initialize active tracks with notes
+        for (0..num_tracks) |i| {
+            timeline.tracks[i] = try Track.init(alloc, voices_per_track, notes_per_track[i]);
+        }
+        // Initialize remaining tracks with empty notes
+        for (num_tracks..MAX_TRACKS) |i| {
+            timeline.tracks[i] = try Track.init(alloc, voices_per_track, &.{});
+        }
+
+        return timeline;
     }
-    pub fn deinit(self: *Timeline, alloc: std.mem.Allocator) void {
-        for (self.tracks) |*t| t.deinit(alloc);
-        alloc.free(self.tracks);
-        self.mixer.deinit(alloc);
-        alloc.destroy(self.mixer);
+
+    pub fn deinit(self: *Timeline) void {
+        for (&self.tracks) |*t| t.deinit(self.alloc);
     }
+
     pub fn asNode(self: *Timeline) audio.Node {
-        return self.mixer.asNode();
+        return .{ .ptr = self, .v = &self.vt };
+    }
+
+    fn _process(p: *anyopaque, ctx: *audio.Context, out: []audio.Sample) void {
+        const self: *Timeline = @ptrCast(@alignCast(p));
+        @memset(out, 0);
+        for (self.tracks[0..self.track_count]) |*track| {
+            const track_out = ctx.tmp().alloc(audio.Sample, out.len) catch unreachable;
+            const node = track.asNode();
+            node.v.process(node.ptr, ctx, track_out);
+            for (out, track_out) |*o, t| o.* += t;
+        }
+    }
+
+    pub fn addTrack(self: *Timeline) error{MaxTracksReached}!void {
+        if (self.track_count >= MAX_TRACKS) return error.MaxTracksReached;
+        self.tracks[self.track_count].clear();
+        self.track_count += 1;
+    }
+
+    pub fn removeTrack(self: *Timeline, position: usize) void {
+        if (position >= self.track_count) return;
+        self.tracks[position].clear();
+        // Rotate removed track to end via swaps
+        for (position..self.track_count - 1) |i| {
+            std.mem.swap(Track, &self.tracks[i], &self.tracks[i + 1]);
+        }
+        self.track_count -= 1;
     }
     pub fn render(self: *Timeline) void {
         _ = self;
@@ -282,5 +312,17 @@ pub const Track = struct {
     }
     pub fn toggleDelay(self: *Track) !void {
         try self.togglePlugin(.delay, createDelay);
+    }
+
+    pub fn clear(self: *Track) void {
+        self.player.clear(self.alloc);
+        self.synth.allNotesOff();
+        self.chains[0].clear();
+        self.chains[1].clear();
+        self.lpf_state = .{};
+        if (self.delay_state) |ds| {
+            ds.deinit(self.alloc);
+            self.delay_state = null;
+        }
     }
 };
