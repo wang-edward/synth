@@ -315,7 +315,7 @@ pub const Track = struct {
     }
 
     pub fn clear(self: *Track) void {
-        self.player.clear(self.alloc);
+        self.player.clear();
         self.synth.allNotesOff();
         self.chains[0].clear();
         self.chains[1].clear();

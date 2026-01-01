@@ -5,8 +5,13 @@ pub const PlaybackOp = union(enum) {
     Seek: u64,
 };
 
+pub const RecordOp = union(enum) {
+    ToggleRecord: usize, // track index to record to
+};
+
 pub const Op = union(enum) {
     Playback: PlaybackOp,
+    Record: RecordOp,
 };
 
 pub const OpQueue = SpscQueue(Op, 32);
