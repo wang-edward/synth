@@ -35,6 +35,10 @@ pub const Player = struct {
     pub fn deinit(self: *Player, alloc: std.mem.Allocator) void {
         alloc.free(self.notes);
     }
+    pub fn clear(self: *Player, alloc: std.mem.Allocator) void {
+        alloc.free(self.notes);
+        self.notes = &.{};
+    }
     pub fn advance(self: *Player, start: Frame, end: Frame, out: []NoteMsg) usize {
         // std.debug.print("start: {}, end: {}", .{ start, end });
         // std.debug.print("notes: {any}", .{self.notes});
