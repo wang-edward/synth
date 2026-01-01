@@ -151,6 +151,7 @@ fn write_callback(
                             // Clear held notes
                             g_held_notes = .{null} ** 128;
                             g_recording = false;
+                            if (g_playing) g_playing = false;
                             std.debug.print("recording stopped, flushed to track {}\n", .{track_idx});
                         } else if (!g_playing) {
                             // Not playing and not recording: start both
