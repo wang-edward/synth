@@ -23,29 +23,26 @@ pub fn beatsToFrames(beats: f32, tempo: f32, ctx: *audio.Context) Frame {
 }
 
 pub const Player = struct {
-    notes: []Note,
-    pub fn init(alloc: std.mem.Allocator, notes_in: []const Note) !Player {
-        const notes = try alloc.alloc(Note, notes_in.len);
-        std.mem.copyForwards(Note, notes, notes_in);
+    notes: std.ArrayListUnmanaged(Note) = .{},
 
-        return .{
-            .notes = notes,
-        };
+    pub fn init(alloc: std.mem.Allocator, notes_in: []const Note) !Player {
+        var notes: std.ArrayListUnmanaged(Note) = .{};
+        try notes.appendSlice(alloc, notes_in);
+        return .{ .notes = notes };
     }
+
     pub fn deinit(self: *Player, alloc: std.mem.Allocator) void {
-        alloc.free(self.notes);
+        self.notes.deinit(alloc);
     }
-    pub fn clear(self: *Player, alloc: std.mem.Allocator) void {
-        alloc.free(self.notes);
-        self.notes = &.{};
+
+    pub fn clear(self: *Player) void {
+        self.notes.clearRetainingCapacity();
     }
+
     pub fn appendNotes(self: *Player, alloc: std.mem.Allocator, new_notes: []const Note) !void {
-        const combined = try alloc.alloc(Note, self.notes.len + new_notes.len);
-        @memcpy(combined[0..self.notes.len], self.notes);
-        @memcpy(combined[self.notes.len..], new_notes);
-        alloc.free(self.notes);
-        self.notes = combined;
+        try self.notes.appendSlice(alloc, new_notes);
     }
+
     pub fn advance(self: *Player, start: Frame, end: Frame, out: []NoteMsg) usize {
         // std.debug.print("start: {}, end: {}", .{ start, end });
         // std.debug.print("notes: {any}", .{self.notes});
@@ -54,7 +51,7 @@ pub const Player = struct {
 
         var count: usize = 0;
 
-        for (self.notes) |n| {
+        for (self.notes.items) |n| {
             // TODO check what happens when advance() is called on the latter boundary wrt <, <=
             // so what if pre_accum == n.start... is this even a problem?
             //
