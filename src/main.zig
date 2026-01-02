@@ -411,36 +411,28 @@ pub fn main() !void {
 
         // 1: toggle LPF, 2: toggle Distortion, 3: toggle Delay
         if (rl.isKeyPressed(.one)) {
-            getActiveTrack().togglePlugin(.{ .lpf = .{
-                .input = undefined,
-                .drive = 1.0,
-                .resonance = 2.0,
-                .cutoff = 2000.0,
-                .state = undefined,
-            } }) catch |err| {
-                std.debug.print("Failed to toggle LPF: {}\n", .{err});
-            };
+            if (getActiveTrack().hasPlugin(.lpf)) {
+                getActiveTrack().removePluginByTag(.lpf);
+            } else {
+                const state = A.create(audio.Lpf.State) catch continue;
+                state.* = .{};
+                getActiveTrack().addPlugin(.{ .lpf = audio.Lpf.init(undefined, 1.0, 2.0, 2000.0, state) });
+            }
         }
         if (rl.isKeyPressed(.two)) {
-            getActiveTrack().togglePlugin(.{ .distortion = .{
-                .input = undefined,
-                .drive = 8.0,
-                .mix = 0.7,
-                .mode = .soft,
-            } }) catch |err| {
-                std.debug.print("Failed to toggle distortion: {}\n", .{err});
-            };
+            if (getActiveTrack().hasPlugin(.distortion)) {
+                getActiveTrack().removePluginByTag(.distortion);
+            } else {
+                getActiveTrack().addPlugin(.{ .distortion = audio.Distortion.init(undefined, 8.0, 0.7, .soft) });
+            }
         }
         if (rl.isKeyPressed(.three)) {
-            getActiveTrack().togglePlugin(.{ .delay = .{
-                .input = undefined,
-                .delay_time = 0.25,
-                .feedback = 0.4,
-                .mix = 0.3,
-                .state = undefined,
-            } }) catch |err| {
-                std.debug.print("Failed to toggle delay: {}\n", .{err});
-            };
+            if (getActiveTrack().hasPlugin(.delay)) {
+                getActiveTrack().removePluginByTag(.delay);
+            } else {
+                const state = audio.Delay.State.init(A, 48_000 * 2) catch continue;
+                getActiveTrack().addPlugin(.{ .delay = audio.Delay.init(undefined, 0.25, 0.4, 0.3, state) });
+            }
         }
 
         // draw UI
