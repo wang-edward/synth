@@ -411,17 +411,34 @@ pub fn main() !void {
 
         // 1: toggle LPF, 2: toggle Distortion, 3: toggle Delay
         if (rl.isKeyPressed(.one)) {
-            getActiveTrack().togglePlugin(.lpf) catch |err| {
+            getActiveTrack().togglePlugin(.{ .lpf = .{
+                .input = undefined,
+                .drive = 1.0,
+                .resonance = 2.0,
+                .cutoff = 2000.0,
+                .state = undefined,
+            } }) catch |err| {
                 std.debug.print("Failed to toggle LPF: {}\n", .{err});
             };
         }
         if (rl.isKeyPressed(.two)) {
-            getActiveTrack().togglePlugin(.distortion) catch |err| {
+            getActiveTrack().togglePlugin(.{ .distortion = .{
+                .input = undefined,
+                .drive = 8.0,
+                .mix = 0.7,
+                .mode = .soft,
+            } }) catch |err| {
                 std.debug.print("Failed to toggle distortion: {}\n", .{err});
             };
         }
         if (rl.isKeyPressed(.three)) {
-            getActiveTrack().togglePlugin(.delay) catch |err| {
+            getActiveTrack().togglePlugin(.{ .delay = .{
+                .input = undefined,
+                .delay_time = 0.25,
+                .feedback = 0.4,
+                .mix = 0.3,
+                .state = undefined,
+            } }) catch |err| {
                 std.debug.print("Failed to toggle delay: {}\n", .{err});
             };
         }
