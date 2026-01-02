@@ -230,10 +230,6 @@ fn audioThreadMain() !void {
     const dev = c.soundio_get_output_device(sio, idx) orelse return error.NoMem;
     defer c.soundio_device_unref(dev);
     out = c.soundio_outstream_create(dev) orelse return error.NoMem;
-    defer {
-        if (out) |p| c.soundio_outstream_destroy(p);
-        out = null;
-    }
     out.?.*.format = c.SoundIoFormatFloat32NE;
     out.?.*.write_callback = write_callback;
     out.?.*.underflow_callback = underflow_callback;
@@ -288,6 +284,12 @@ fn audioThreadMain() !void {
     while (g_run_audio.load(.acquire)) {
         c.soundio_wait_events(sio);
     }
+
+    // close outstream before g_timeline.deinit(). this prevents audio callbacks from running when there's nothing to fill the buffer
+    // defer doesn't work in this case because the notes depend on context.sr
+    // can be fixed by creating g_timeline first and then appending notes instead of doing it in place like this
+    if (out) |p| c.soundio_outstream_destroy(p);
+    out = null;
 }
 
 fn keyToMidi(key: rl.KeyboardKey) ?u8 {
