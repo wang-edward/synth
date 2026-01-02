@@ -88,7 +88,6 @@ pub const Timeline = struct {
 
 pub const PluginTag = enum { lpf, distortion, delay, gain };
 
-/// Plugin state owned by Track, persists across graph swaps
 pub const PluginState = union(PluginTag) {
     lpf: audio.Lpf.State,
     distortion: void,
@@ -112,7 +111,6 @@ pub const PluginState = union(PluginTag) {
     }
 };
 
-/// Plugin node in chain (just topology, no state)
 pub const Plugin = union(PluginTag) {
     lpf: *audio.Lpf,
     distortion: *audio.Distortion,
@@ -183,7 +181,6 @@ pub const PluginChain = struct {
         }
         self.len = 0;
     }
-
 };
 
 pub const Track = struct {
