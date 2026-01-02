@@ -28,11 +28,11 @@ pub const Timeline = struct {
             .track_count = num_tracks,
         };
 
-        // Initialize active tracks with notes
+        // initialize active tracks with notes
         for (0..num_tracks) |i| {
             timeline.tracks[i] = try Track.init(alloc, voices_per_track, notes_per_track[i]);
         }
-        // Initialize remaining tracks with empty notes
+        // initialize remaining tracks with empty notes
         for (num_tracks..MAX_TRACKS) |i| {
             timeline.tracks[i] = try Track.init(alloc, voices_per_track, &.{});
         }
@@ -88,7 +88,6 @@ pub const Timeline = struct {
 
 pub const PluginTag = enum { lpf, distortion, delay, gain };
 
-/// Plugin stored by value. State pointer is shared between both chains.
 pub const Plugin = union(PluginTag) {
     lpf: audio.Lpf,
     distortion: audio.Distortion,
