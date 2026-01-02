@@ -140,6 +140,14 @@ pub const Plugin = union(PluginTag) {
             .gain => |*p| p.input = input,
         }
     }
+
+    pub fn getState(self: Plugin) ?*anyopaque {
+        return switch (self) {
+            .lpf => |p| @ptrCast(p.state),
+            .delay => |p| @ptrCast(p.state),
+            .distortion, .gain => null,
+        };
+    }
 };
 
 // chain is: input -> plugins[0] -> plugins[1] -> ... -> output
@@ -196,7 +204,6 @@ pub const Track = struct {
     player: midi.Player,
     alloc: std.mem.Allocator,
 
-    // chains[0] is source of truth, chains[1] mirrors with different input wiring
     chains: [2]PluginChain,
     active: std.atomic.Value(u8),
 
@@ -217,7 +224,7 @@ pub const Track = struct {
     pub fn deinit(self: *Track, alloc: std.mem.Allocator) void {
         self.synth.deinit(alloc);
         self.player.deinit(alloc);
-        // free state from chains[0] (source of truth)
+        // free state from chains[0]
         for (self.chains[0].plugins[0..self.chains[0].len]) |p| {
             p.destroyState(alloc);
         }
@@ -235,7 +242,12 @@ pub const Track = struct {
 
     fn assertInvariant(self: *Track) void {
         std.debug.assert(self.chains[0].len == self.chains[1].len);
-        // both chains have same plugins with same state pointers
+        for (self.chains[0].plugins[0..self.chains[0].len], self.chains[1].plugins[0..self.chains[1].len]) |p0, p1| {
+            const tag0: PluginTag = p0;
+            const tag1: PluginTag = p1;
+            std.debug.assert(tag0 == tag1);
+            std.debug.assert(p0.getState() == p1.getState());
+        }
     }
 
     pub fn addPlugin(self: *Track, plugin: Plugin) !void {
@@ -269,7 +281,7 @@ pub const Track = struct {
         const active_idx = self.active.load(.acquire);
         const inactive_idx = active_idx ^ 1;
 
-        // grab state before removing (from source of truth)
+        // grab state before removing
         const plugin = self.chains[0].plugins[idx];
 
         // remove from inactive, swap, remove from active
