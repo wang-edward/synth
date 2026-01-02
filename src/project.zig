@@ -181,6 +181,24 @@ pub const PluginChain = struct {
         }
         self.len = 0;
     }
+
+    pub fn remove(self: *PluginChain, idx: usize) void {
+        if (idx >= self.len) return;
+        self.plugins[idx].deinit(self.alloc);
+        for (idx..self.len - 1) |i| {
+            self.plugins[i] = self.plugins[i + 1];
+        }
+        self.len -= 1;
+        self.rewire();
+    }
+
+    fn rewire(self: *PluginChain) void {
+        var prev = self.input;
+        for (self.plugins[0..self.len]) |*p| {
+            p.setInput(prev);
+            prev = p.asNode();
+        }
+    }
 };
 
 pub const Track = struct {
@@ -234,23 +252,6 @@ pub const Track = struct {
         return .{ .ptr = self, .v = &self.vt };
     }
 
-    fn findState(self: *Track, tag: PluginTag) ?usize {
-        for (self.plugin_states[0..self.plugin_count], 0..) |ps, i| {
-            if (ps != null and ps.? == tag) return i;
-        }
-        return null;
-    }
-
-    fn rebuildChain(self: *Track, chain: *PluginChain) !void {
-        chain.clear();
-        for (self.plugin_states[0..self.plugin_count]) |*ps| {
-            if (ps.*) |*state| {
-                const plugin = try self.createNode(state, chain.output());
-                chain.append(plugin);
-            }
-        }
-    }
-
     fn createNode(self: *Track, state: *PluginState, input: audio.Node) !Plugin {
         return switch (state.*) {
             .lpf => |*s| blk: {
@@ -280,26 +281,45 @@ pub const Track = struct {
         const active_idx = self.active.load(.acquire);
         const inactive_idx = active_idx ^ 1;
 
-        if (self.findState(tag)) |idx| {
-            // remove: rebuild inactive, swap, rebuild other, free state
+        // find if plugin exists in active chain
+        var found_idx: ?usize = null;
+        for (self.chains[active_idx].plugins[0..self.chains[active_idx].len], 0..) |p, i| {
+            if (p == tag) {
+                found_idx = i;
+                break;
+            }
+        }
+
+        if (found_idx) |idx| {
+            // remove from inactive, swap, remove from active
+            self.chains[inactive_idx].remove(idx);
+            self.active.store(inactive_idx, .release);
+            self.chains[active_idx].remove(idx);
+            // free the shared state
             self.plugin_states[idx].?.deinit(self.alloc);
-            self.plugin_states[idx] = null;
-            // compact
             for (idx..self.plugin_count - 1) |i| self.plugin_states[i] = self.plugin_states[i + 1];
             self.plugin_states[self.plugin_count - 1] = null;
             self.plugin_count -= 1;
         } else {
-            // add: create state
+            // create shared state
             self.plugin_states[self.plugin_count] = try PluginState.init(self.alloc, tag);
+            const state = &self.plugin_states[self.plugin_count].?;
             self.plugin_count += 1;
+            // add to inactive, swap, add to active
+            const p1 = try self.createNode(state, self.chains[inactive_idx].output());
+            self.chains[inactive_idx].append(p1);
+            self.active.store(inactive_idx, .release);
+            const p2 = try self.createNode(state, self.chains[active_idx].output());
+            self.chains[active_idx].append(p2);
         }
-        try self.rebuildChain(&self.chains[inactive_idx]);
-        self.active.store(inactive_idx, .release);
-        try self.rebuildChain(&self.chains[active_idx]);
     }
 
     pub fn hasPlugin(self: *Track, tag: PluginTag) bool {
-        return self.findState(tag) != null;
+        const chain = &self.chains[self.active.load(.acquire)];
+        for (chain.plugins[0..chain.len]) |p| {
+            if (p == tag) return true;
+        }
+        return false;
     }
 
     pub fn clear(self: *Track) void {
