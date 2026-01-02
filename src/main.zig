@@ -230,10 +230,6 @@ fn audioThreadMain() !void {
     const dev = c.soundio_get_output_device(sio, idx) orelse return error.NoMem;
     defer c.soundio_device_unref(dev);
     out = c.soundio_outstream_create(dev) orelse return error.NoMem;
-    defer {
-        if (out) |p| c.soundio_outstream_destroy(p);
-        out = null;
-    }
     out.?.*.format = c.SoundIoFormatFloat32NE;
     out.?.*.write_callback = write_callback;
     out.?.*.underflow_callback = underflow_callback;
@@ -288,6 +284,12 @@ fn audioThreadMain() !void {
     while (g_run_audio.load(.acquire)) {
         c.soundio_wait_events(sio);
     }
+
+    // close outstream before g_timeline.deinit(). this prevents audio callbacks from running when there's nothing to fill the buffer
+    // defer doesn't work in this case because the notes depend on context.sr
+    // TODO can be fixed by creating g_timeline first and then appending notes instead of doing it in place like this
+    if (out) |p| c.soundio_outstream_destroy(p);
+    out = null;
 }
 
 fn keyToMidi(key: rl.KeyboardKey) ?u8 {
@@ -409,19 +411,28 @@ pub fn main() !void {
 
         // 1: toggle LPF, 2: toggle Distortion, 3: toggle Delay
         if (rl.isKeyPressed(.one)) {
-            getActiveTrack().toggleLpf() catch |err| {
-                std.debug.print("Failed to toggle LPF: {}\n", .{err});
-            };
+            if (getActiveTrack().hasPlugin(.lpf)) {
+                getActiveTrack().removePluginByTag(.lpf);
+            } else {
+                const state = A.create(audio.Lpf.State) catch continue;
+                state.* = .{};
+                getActiveTrack().addPlugin(.{ .lpf = audio.Lpf.init(undefined, 1.0, 2.0, 2000.0, state) });
+            }
         }
         if (rl.isKeyPressed(.two)) {
-            getActiveTrack().toggleDistortion() catch |err| {
-                std.debug.print("Failed to toggle distortion: {}\n", .{err});
-            };
+            if (getActiveTrack().hasPlugin(.distortion)) {
+                getActiveTrack().removePluginByTag(.distortion);
+            } else {
+                getActiveTrack().addPlugin(.{ .distortion = audio.Distortion.init(undefined, 8.0, 0.7, .soft) });
+            }
         }
         if (rl.isKeyPressed(.three)) {
-            getActiveTrack().toggleDelay() catch |err| {
-                std.debug.print("Failed to toggle delay: {}\n", .{err});
-            };
+            if (getActiveTrack().hasPlugin(.delay)) {
+                getActiveTrack().removePluginByTag(.delay);
+            } else {
+                const state = audio.Delay.State.init(A, 48_000 * 2) catch continue;
+                getActiveTrack().addPlugin(.{ .delay = audio.Delay.init(undefined, 0.25, 0.4, 0.3, state) });
+            }
         }
 
         // draw UI
