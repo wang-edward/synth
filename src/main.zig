@@ -287,7 +287,7 @@ fn audioThreadMain() !void {
 
     // close outstream before g_timeline.deinit(). this prevents audio callbacks from running when there's nothing to fill the buffer
     // defer doesn't work in this case because the notes depend on context.sr
-    // can be fixed by creating g_timeline first and then appending notes instead of doing it in place like this
+    // TODO can be fixed by creating g_timeline first and then appending notes instead of doing it in place like this
     if (out) |p| c.soundio_outstream_destroy(p);
     out = null;
 }
