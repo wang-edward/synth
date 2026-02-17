@@ -78,104 +78,72 @@ pub const Plugin = union(PluginTag) {
 
     pub fn deinitState(self: Plugin, alloc: std.mem.Allocator) void {
         switch (self) {
-            .lpf => |p| alloc.destroy(p.state),
+            inline else => |p| {
+                if (@hasField(@TypeOf(p), "state")) {
+                    if (@hasDecl(@TypeOf(p.state.*), "deinit")) {
+                        p.state.deinit(alloc);
+                    } else {
+                        alloc.destroy(p.state);
+                    }
+                }
+            },
         }
     }
 
     pub fn asNode(self: *Plugin) audio.Node {
-        return switch (self.*) {
-            .lpf => |*p| p.asNode(),
-        };
+        switch (self.*) {
+            inline else => |*p| return p.asNode(),
+        }
     }
 
     pub fn setInput(self: *Plugin, input: audio.Node) void {
         switch (self.*) {
-            .lpf => |*p| p.input = input,
-        }
-    }
-};
-
-// chain is: input -> plugins[0] -> plugins[1] -> ... -> output
-pub const PluginChain = struct {
-    pub const MAX_PLUGINS = 8;
-
-    input: audio.Node,
-    plugins: [MAX_PLUGINS]Plugin,
-    len: usize,
-
-    pub fn init(input: audio.Node) PluginChain {
-        return .{ .input = input, .plugins = undefined, .len = 0 };
-    }
-
-    pub fn output(self: *PluginChain) audio.Node {
-        if (self.len > 0) return self.plugins[self.len - 1].asNode();
-        return self.input;
-    }
-
-    pub fn append(self: *PluginChain, plugin: Plugin) void {
-        std.debug.assert(self.len < MAX_PLUGINS);
-        self.plugins[self.len] = plugin;
-        self.plugins[self.len].setInput(self.prevOutput());
-        self.len += 1;
-    }
-
-    pub fn remove(self: *PluginChain, idx: usize) void {
-        if (idx >= self.len) return;
-        for (idx..self.len - 1) |i| {
-            self.plugins[i] = self.plugins[i + 1];
-        }
-        self.len -= 1;
-        self.rewire();
-    }
-
-    fn prevOutput(self: *PluginChain) audio.Node {
-        if (self.len > 0) return self.plugins[self.len - 1].asNode();
-        return self.input;
-    }
-
-    fn rewire(self: *PluginChain) void {
-        var prev = self.input;
-        for (self.plugins[0..self.len]) |*p| {
-            p.setInput(prev);
-            prev = p.asNode();
+            inline else => |*p| {
+                p.input = input;
+            },
         }
     }
 };
 
 pub const Track = struct {
-    pub const MAX_PLUGINS = PluginChain.MAX_PLUGINS;
+    pub const MAX_PLUGINS = 8;
 
     synth: *uni.Uni,
     player: midi.Player,
     alloc: std.mem.Allocator,
 
-    chain: PluginChain,
+    plugins: [MAX_PLUGINS]Plugin,
+    plugin_count: usize,
 
     vt: audio.VTable = .{ .process = Track._process },
 
     pub fn init(alloc: std.mem.Allocator, voice_count: usize, notes_in: []const midi.Note) !Track {
-        const synth = try uni.Uni.init(alloc, voice_count);
-        const synth_node = synth.asNode();
         return .{
-            .synth = synth,
+            .synth = try uni.Uni.init(alloc, voice_count),
             .player = try midi.Player.init(alloc, notes_in),
             .alloc = alloc,
-            .chain = PluginChain.init(synth_node),
+            .plugins = undefined,
+            .plugin_count = 0,
         };
     }
 
     pub fn deinit(self: *Track, alloc: std.mem.Allocator) void {
         self.synth.deinit(alloc);
         self.player.deinit(alloc);
-        for (self.chain.plugins[0..self.chain.len]) |p| {
+        for (self.plugins[0..self.plugin_count]) |p| {
             p.deinitState(alloc);
         }
     }
 
     fn _process(p: *anyopaque, ctx: *audio.Context, out: []audio.Sample) void {
         const self: *Track = @ptrCast(@alignCast(p));
-        const node = self.chain.output();
+        const node = self.output();
         node.v.process(node.ptr, ctx, out);
+    }
+
+    fn output(self: *Track) audio.Node {
+        if (self.plugin_count > 0) return self.plugins[self.plugin_count - 1].asNode();
+        return self.synth.asNode();
     }
 
     pub fn asNode(self: *Track) audio.Node {
@@ -183,24 +151,35 @@ pub const Track = struct {
     }
 
     pub fn addPlugin(self: *Track, plugin: Plugin) void {
-        self.chain.append(plugin);
+        std.debug.assert(self.plugin_count < MAX_PLUGINS);
+        self.plugins[self.plugin_count] = plugin;
+        const prev = if (self.plugin_count > 0)
+            self.plugins[self.plugin_count - 1].asNode()
+        else
+            self.synth.asNode();
+        self.plugins[self.plugin_count].setInput(prev);
+        self.plugin_count += 1;
     }
 
     pub fn removePlugin(self: *Track, idx: usize) Plugin {
-        const plugin = self.chain.plugins[idx];
-        self.chain.remove(idx);
+        const plugin = self.plugins[idx];
+        for (idx..self.plugin_count - 1) |i| {
+            self.plugins[i] = self.plugins[i + 1];
+        }
+        self.plugin_count -= 1;
+        self.rewire();
         return plugin;
     }
 
     pub fn hasPlugin(self: *Track, tag: PluginTag) bool {
-        for (self.chain.plugins[0..self.chain.len]) |p| {
+        for (self.plugins[0..self.plugin_count]) |p| {
             if (p == tag) return true;
         }
         return false;
     }
 
     pub fn findPlugin(self: *Track, tag: PluginTag) ?usize {
-        for (self.chain.plugins[0..self.chain.len], 0..) |p, i| {
+        for (self.plugins[0..self.plugin_count], 0..) |p, i| {
             if (p == tag) return i;
         }
         return null;
@@ -216,6 +195,14 @@ pub const Track = struct {
     pub fn clear(self: *Track) void {
         self.player.clear();
         self.synth.allNotesOff();
-        self.chain.len = 0;
+        self.plugin_count = 0;
+    }
+
+    fn rewire(self: *Track) void {
+        var prev = self.synth.asNode();
+        for (self.plugins[0..self.plugin_count]) |*p| {
+            p.setInput(prev);
+            prev = p.asNode();
+        }
     }
 };

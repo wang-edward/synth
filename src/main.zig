@@ -188,7 +188,7 @@ fn write_callback(
                 .RemoveTrack => |pos| {
                     if (pos < g_timeline.track_count) {
                         const track = &g_timeline.tracks[pos];
-                        for (track.chain.plugins[0..track.chain.len]) |p| {
+                        for (track.plugins[0..track.plugin_count]) |p| {
                             _ = g_garbage_queue.push(p);
                         }
                         track.clear();
