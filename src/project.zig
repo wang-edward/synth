@@ -59,21 +59,6 @@ pub const Timeline = struct {
         }
     }
 
-    pub fn addTrack(self: *Timeline) error{MaxTracksReached}!void {
-        if (self.track_count >= MAX_TRACKS) return error.MaxTracksReached;
-        self.tracks[self.track_count].clear();
-        self.track_count += 1;
-    }
-
-    pub fn removeTrack(self: *Timeline, position: usize) void {
-        if (position >= self.track_count) return;
-        self.tracks[position].clear();
-        // Rotate removed track to end via swaps
-        for (position..self.track_count - 1) |i| {
-            std.mem.swap(Track, &self.tracks[i], &self.tracks[i + 1]);
-        }
-        self.track_count -= 1;
-    }
     pub fn render(self: *Timeline) void {
         _ = self;
         for (0..interface.WIDTH) |x| {
@@ -183,8 +168,7 @@ pub const Track = struct {
     player: midi.Player,
     alloc: std.mem.Allocator,
 
-    chains: [2]PluginChain,
-    active: std.atomic.Value(u8),
+    chain: PluginChain,
 
     vt: audio.VTable = .{ .process = Track._process },
 
@@ -195,22 +179,21 @@ pub const Track = struct {
             .synth = synth,
             .player = try midi.Player.init(alloc, notes_in),
             .alloc = alloc,
-            .chains = .{ PluginChain.init(synth_node), PluginChain.init(synth_node) },
-            .active = std.atomic.Value(u8).init(0),
+            .chain = PluginChain.init(synth_node),
         };
     }
 
     pub fn deinit(self: *Track, alloc: std.mem.Allocator) void {
         self.synth.deinit(alloc);
         self.player.deinit(alloc);
-        for (self.chains[0].plugins[0..self.chains[0].len]) |p| {
+        for (self.chain.plugins[0..self.chain.len]) |p| {
             p.deinitState(alloc);
         }
     }
 
     fn _process(p: *anyopaque, ctx: *audio.Context, out: []audio.Sample) void {
         const self: *Track = @ptrCast(@alignCast(p));
-        const node = self.chains[self.active.load(.acquire)].output();
+        const node = self.chain.output();
         node.v.process(node.ptr, ctx, out);
     }
 
@@ -218,79 +201,40 @@ pub const Track = struct {
         return .{ .ptr = self, .v = &self.vt };
     }
 
-    fn assertInvariant(self: *Track) void {
-        std.debug.assert(self.chains[0].len == self.chains[1].len);
-        for (self.chains[0].plugins[0..self.chains[0].len], self.chains[1].plugins[0..self.chains[1].len]) |p0, p1| {
-            const tag0: PluginTag = p0;
-            const tag1: PluginTag = p1;
-            std.debug.assert(tag0 == tag1);
-            std.debug.assert(p0.getState() == p1.getState());
-        }
-    }
-
     pub fn addPlugin(self: *Track, plugin: Plugin) void {
-        self.assertInvariant();
-        const active_idx = self.active.load(.acquire);
-        const inactive_idx = active_idx ^ 1;
-
-        // copy to inactive chain
-        self.chains[inactive_idx].append(plugin);
-        // swap
-        self.active.store(inactive_idx, .release);
-        // copy to other chain (same state pointer, different input wiring)
-        self.chains[active_idx].append(plugin);
-
-        self.assertInvariant();
+        self.chain.append(plugin);
     }
 
-    pub fn removePlugin(self: *Track, idx: usize) void {
-        self.assertInvariant();
-        if (idx >= self.chains[0].len) return;
-
-        const active_idx = self.active.load(.acquire);
-        const inactive_idx = active_idx ^ 1;
-
-        // grab plugin before removing (to free state later)
-        const plugin = self.chains[0].plugins[idx];
-
-        // remove from inactive, swap, remove from active
-        self.chains[inactive_idx].remove(idx);
-        self.active.store(inactive_idx, .release);
-        self.chains[active_idx].remove(idx);
-
-        // now safe to free state
-        plugin.deinitState(self.alloc);
-
-        self.assertInvariant();
+    pub fn removePlugin(self: *Track, idx: usize) Plugin {
+        const plugin = self.chain.plugins[idx];
+        self.chain.remove(idx);
+        return plugin;
     }
 
     pub fn hasPlugin(self: *Track, tag: PluginTag) bool {
-        for (self.chains[0].plugins[0..self.chains[0].len]) |p| {
+        for (self.chain.plugins[0..self.chain.len]) |p| {
             if (p == tag) return true;
         }
         return false;
     }
 
     pub fn findPlugin(self: *Track, tag: PluginTag) ?usize {
-        for (self.chains[0].plugins[0..self.chains[0].len], 0..) |p, i| {
+        for (self.chain.plugins[0..self.chain.len], 0..) |p, i| {
             if (p == tag) return i;
         }
         return null;
     }
 
-    pub fn removePluginByTag(self: *Track, tag: PluginTag) void {
+    pub fn removePluginByTag(self: *Track, tag: PluginTag) ?Plugin {
         if (self.findPlugin(tag)) |idx| {
-            self.removePlugin(idx);
+            return self.removePlugin(idx);
         }
+        return null;
     }
 
     pub fn clear(self: *Track) void {
         self.player.clear();
         self.synth.allNotesOff();
-        for (self.chains[0].plugins[0..self.chains[0].len]) |p| {
-            p.deinitState(self.alloc);
-        }
-        self.chains[0].len = 0;
-        self.chains[1].len = 0;
+        self.chain.len = 0;
     }
 };
