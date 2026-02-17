@@ -71,46 +71,27 @@ pub const Timeline = struct {
     }
 };
 
-pub const PluginTag = enum { lpf, distortion, delay, gain };
+pub const PluginTag = enum { lpf };
 
 pub const Plugin = union(PluginTag) {
     lpf: audio.Lpf,
-    distortion: audio.Distortion,
-    delay: audio.Delay,
-    gain: audio.Gain,
 
     pub fn deinitState(self: Plugin, alloc: std.mem.Allocator) void {
         switch (self) {
             .lpf => |p| alloc.destroy(p.state),
-            .delay => |p| p.state.deinit(alloc),
-            .distortion, .gain => {},
         }
     }
 
     pub fn asNode(self: *Plugin) audio.Node {
         return switch (self.*) {
             .lpf => |*p| p.asNode(),
-            .distortion => |*p| p.asNode(),
-            .delay => |*p| p.asNode(),
-            .gain => |*p| p.asNode(),
         };
     }
 
     pub fn setInput(self: *Plugin, input: audio.Node) void {
         switch (self.*) {
             .lpf => |*p| p.input = input,
-            .distortion => |*p| p.input = input,
-            .delay => |*p| p.input = input,
-            .gain => |*p| p.input = input,
         }
-    }
-
-    pub fn getState(self: Plugin) ?*anyopaque {
-        return switch (self) {
-            .lpf => |p| @ptrCast(p.state),
-            .delay => |p| @ptrCast(p.state),
-            .distortion, .gain => null,
-        };
     }
 };
 
