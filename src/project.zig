@@ -171,6 +171,7 @@ pub const Track = struct {
         return plugin;
     }
 
+    // for testing, TODO remove
     pub fn hasPlugin(self: *Track, tag: PluginTag) bool {
         for (self.plugins[0..self.plugin_count]) |p| {
             if (p == tag) return true;
@@ -178,6 +179,7 @@ pub const Track = struct {
         return false;
     }
 
+    // for testing, TODO remove
     pub fn findPlugin(self: *Track, tag: PluginTag) ?usize {
         for (self.plugins[0..self.plugin_count], 0..) |p, i| {
             if (p == tag) return i;
@@ -185,6 +187,7 @@ pub const Track = struct {
         return null;
     }
 
+    // for testing, TODO remove
     pub fn removePluginByTag(self: *Track, tag: PluginTag) ?Plugin {
         if (self.findPlugin(tag)) |idx| {
             return self.removePlugin(idx);
