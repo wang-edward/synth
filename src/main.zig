@@ -2,8 +2,6 @@ const std = @import("std");
 const rl = @import("raylib");
 const c = @cImport(@cInclude("soundio/soundio.h"));
 const audio = @import("audio.zig");
-const uni = @import("uni.zig");
-const queue = @import("queue.zig");
 const midi = @import("midi.zig");
 const ops = @import("ops.zig");
 const interface = @import("interface.zig");
@@ -15,6 +13,8 @@ var g_playing: bool = false;
 var g_recording: bool = false;
 var g_timeline: project.Timeline = undefined;
 var g_op_queue: ops.OpQueue = .{};
+var g_graph_queue: ops.GraphQueue = .{};
+var g_garbage_queue: ops.GarbageQueue = .{};
 var g_active_track: usize = 0;
 
 // Recording state
@@ -164,6 +164,39 @@ fn write_callback(
                             std.debug.print("recording started on track {}\n", .{track_idx});
                         }
                     },
+                },
+            }
+        }
+
+        // process graph ops
+        while (g_graph_queue.pop()) |cmd| {
+            switch (cmd) {
+                .AddPlugin => |payload| {
+                    g_timeline.tracks[payload.track].addPlugin(payload.plugin);
+                },
+                .RemovePlugin => |payload| {
+                    if (g_timeline.tracks[payload.track].removePluginByTag(payload.tag)) |old| {
+                        _ = g_garbage_queue.push(old);
+                    }
+                },
+                .AddTrack => {
+                    if (g_timeline.track_count < project.Timeline.MAX_TRACKS) {
+                        g_timeline.tracks[g_timeline.track_count].clear();
+                        g_timeline.track_count += 1;
+                    }
+                },
+                .RemoveTrack => |pos| {
+                    if (pos < g_timeline.track_count) {
+                        const track = &g_timeline.tracks[pos];
+                        for (track.chain.plugins[0..track.chain.len]) |p| {
+                            _ = g_garbage_queue.push(p);
+                        }
+                        track.clear();
+                        for (pos..g_timeline.track_count - 1) |i| {
+                            std.mem.swap(project.Track, &g_timeline.tracks[i], &g_timeline.tracks[i + 1]);
+                        }
+                        g_timeline.track_count -= 1;
+                    }
                 },
             }
         }
@@ -342,6 +375,11 @@ pub fn main() !void {
     for (note_keys) |k| try key_state.put(k, null);
 
     while (!rl.windowShouldClose()) {
+        // drain garbage queue — free plugin state on main thread
+        while (g_garbage_queue.pop()) |p| {
+            p.deinitState(A);
+        }
+
         for (note_keys) |key| {
             const down = rl.isKeyDown(key);
             const active_note = key_state.get(key).?;
@@ -391,12 +429,12 @@ pub fn main() !void {
 
         // - / = : remove / add track
         if (rl.isKeyPressed(.minus)) {
-            g_timeline.removeTrack(g_active_track);
+            while (!g_graph_queue.push(.{ .RemoveTrack = g_active_track })) {}
             std.debug.print("removed track {}\n", .{g_active_track});
         }
         if (rl.isKeyPressed(.equal)) {
-            g_timeline.addTrack() catch {};
-            std.debug.print("added track {}\n", .{g_timeline.track_count - 1});
+            while (!g_graph_queue.push(.AddTrack)) {}
+            std.debug.print("added track\n", .{});
         }
 
         // [ / ] : switch active track
@@ -409,29 +447,14 @@ pub fn main() !void {
             std.debug.print("current track: {}\n", .{g_active_track});
         }
 
-        // 1: toggle LPF, 2: toggle Distortion, 3: toggle Delay
+        // 1: toggle LPF
         if (rl.isKeyPressed(.one)) {
             if (getActiveTrack().hasPlugin(.lpf)) {
-                getActiveTrack().removePluginByTag(.lpf);
+                while (!g_graph_queue.push(.{ .RemovePlugin = .{ .track = g_active_track, .tag = .lpf } })) {}
             } else {
                 const state = A.create(audio.Lpf.State) catch continue;
                 state.* = .{};
-                getActiveTrack().addPlugin(.{ .lpf = audio.Lpf.init(undefined, 1.0, 2.0, 2000.0, state) });
-            }
-        }
-        if (rl.isKeyPressed(.two)) {
-            if (getActiveTrack().hasPlugin(.distortion)) {
-                getActiveTrack().removePluginByTag(.distortion);
-            } else {
-                getActiveTrack().addPlugin(.{ .distortion = audio.Distortion.init(undefined, 8.0, 0.7, .soft) });
-            }
-        }
-        if (rl.isKeyPressed(.three)) {
-            if (getActiveTrack().hasPlugin(.delay)) {
-                getActiveTrack().removePluginByTag(.delay);
-            } else {
-                const state = audio.Delay.State.init(A, 48_000 * 2) catch continue;
-                getActiveTrack().addPlugin(.{ .delay = audio.Delay.init(undefined, 0.25, 0.4, 0.3, state) });
+                while (!g_graph_queue.push(.{ .AddPlugin = .{ .track = g_active_track, .plugin = .{ .lpf = audio.Lpf.init(undefined, 1.0, 2.0, 2000.0, state) } } })) {}
             }
         }
 
