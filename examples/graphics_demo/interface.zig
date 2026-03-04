@@ -111,3 +111,9 @@ pub fn nextEvent() ?Event {
         }
     }
 }
+
+pub const Action = union(enum) {
+    None,
+    Op,
+    GoBack,
+};

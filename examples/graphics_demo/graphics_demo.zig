@@ -1,7 +1,7 @@
 const std = @import("std");
 const rl = @import("raylib");
 const interface = @import("interface.zig");
-const project = @import("project.zig");
+const project = @import("project2.zig");
 
 const WIDTH = 128;
 const HEIGHT = 128;
@@ -17,12 +17,13 @@ pub fn main() !void {
     var circle_y: f32 = HEIGHT / 2;
     const speed: f32 = 2.0;
 
-    var app: project.App = .{ .timeline = .{ .track = .{} } };
+    var app: project.App = .{ .timeline = .{ .track = .{}, .midi_editor = .{}, .screen = .overview } };
 
     while (!interface.shouldClose()) {
         // poll events
         while (interface.nextEvent()) |ev| {
             std.debug.print("event: {s} {s}\n", .{ @tagName(ev.type), @tagName(ev.key) });
+            _ = app.handleEvent(ev);
         }
 
         // update
