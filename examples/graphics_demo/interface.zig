@@ -4,42 +4,18 @@ const rl = @import("raylib");
 pub const WIDTH = 128;
 pub const HEIGHT = 128;
 
-pub const Event = struct {
-    type: EventType,
-    key: rl.KeyboardKey,
-};
-
-pub const EventType = enum {
-    key_press,
-    key_release,
-};
-
 var target: rl.RenderTexture2D = undefined;
-var keys_pressed: std.AutoHashMap(i32, bool) = undefined;
 
-pub fn init(allocator: std.mem.Allocator) !void {
+pub fn init() !void {
+    // rl.setConfigFlags(.{ .window_resizable = true }); // commented because it looks weird with aerospace window manager
     rl.initWindow(512, 512, "LeDaw");
 
     target = try rl.loadRenderTexture(WIDTH, HEIGHT);
     rl.setTargetFPS(60);
     rl.setExitKey(.null); // ESC doesn't close program
-
-    keys_pressed = std.AutoHashMap(i32, bool).init(allocator);
-
-    // Initialize common keys
-    const tracked_keys = [_]rl.KeyboardKey{
-        .up,    .down,  .left,   .right,
-        .w,     .a,     .s,      .d,
-        .space, .enter, .escape,
-    };
-
-    for (tracked_keys) |key| {
-        try keys_pressed.put(@intFromEnum(key), false);
-    }
 }
 
 pub fn deinit() void {
-    keys_pressed.deinit();
     rl.unloadRenderTexture(target);
     rl.closeWindow();
 }
@@ -82,30 +58,56 @@ pub fn postRender() void {
     );
 }
 
-pub fn pollEvent(event: *Event) bool {
-    var iter = keys_pressed.iterator();
-    while (iter.next()) |entry| {
-        const key_int = entry.key_ptr.*;
-        const is_pressed = entry.value_ptr;
-        const key: rl.KeyboardKey = @enumFromInt(key_int);
-
-        if (rl.isKeyDown(key)) {
-            if (!is_pressed.*) {
-                is_pressed.* = true;
-                event.type = .key_press;
-                event.key = key;
-                return true;
-            }
-        } else if (is_pressed.*) {
-            is_pressed.* = false;
-            event.type = .key_release;
-            event.key = key;
-            return true;
-        }
-    }
-    return false;
-}
-
 pub fn shouldClose() bool {
     return rl.windowShouldClose();
+}
+
+pub const EventType = enum {
+    key_press,
+    key_release,
+};
+
+pub const Event = struct {
+    type: EventType,
+    key: rl.KeyboardKey,
+};
+
+const poll_keys = [_]rl.KeyboardKey{
+    .a,             .b,         .c,         .d,          .e,          .f,           .g,            .h,             .i,        .j,         .k,          .l,           .m,
+    .n,             .o,         .p,         .q,          .r,          .s,           .t,            .u,             .v,        .w,         .x,          .y,           .z,
+    .zero,          .one,       .two,       .three,      .four,       .five,        .six,          .seven,         .eight,    .nine,      .escape,     .grave,       .minus,
+    .equal,         .backspace, .tab,       .caps_lock,  .left_shift, .right_shift, .left_control, .right_control, .left_alt, .right_alt, .left_super, .right_super, .left_bracket,
+    .right_bracket, .backslash, .semicolon, .apostrophe, .enter,      .comma,       .period,       .slash,         .space,    .up,        .down,       .left,        .right,
+    .delete,
+};
+
+var poll_index: usize = 0;
+var poll_phase: enum { press, release } = .press;
+
+pub fn nextEvent() ?Event {
+    while (true) {
+        if (poll_phase == .press) {
+            while (poll_index < poll_keys.len) {
+                const key = poll_keys[poll_index];
+                poll_index += 1;
+                if (rl.isKeyPressed(key)) {
+                    return .{ .type = .key_press, .key = key };
+                }
+            }
+            poll_index = 0;
+            poll_phase = .release;
+        }
+        if (poll_phase == .release) {
+            while (poll_index < poll_keys.len) {
+                const key = poll_keys[poll_index];
+                poll_index += 1;
+                if (rl.isKeyReleased(key)) {
+                    return .{ .type = .key_release, .key = key };
+                }
+            }
+            poll_index = 0;
+            poll_phase = .press;
+            return null;
+        }
+    }
 }

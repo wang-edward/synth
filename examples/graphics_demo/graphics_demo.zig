@@ -9,9 +9,8 @@ const HEIGHT = 128;
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
 
-    try interface.init(allocator);
+    try interface.init();
     defer interface.deinit();
 
     var circle_x: f32 = WIDTH / 2;
@@ -22,11 +21,8 @@ pub fn main() !void {
 
     while (!interface.shouldClose()) {
         // poll events
-        var event: interface.Event = undefined;
-        if (interface.pollEvent(&event)) {
-            if (event.type == .key_press) {
-                std.debug.print("Key pressed: {}\n", .{event.key});
-            }
+        while (interface.nextEvent()) |ev| {
+            std.debug.print("event: {s} {s}\n", .{ @tagName(ev.type), @tagName(ev.key) });
         }
 
         // update
