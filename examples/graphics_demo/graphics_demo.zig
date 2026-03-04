@@ -1,7 +1,7 @@
 const std = @import("std");
 const rl = @import("raylib");
 const interface = @import("interface.zig");
-const timeline = @import("timeline.zig");
+const project = @import("project.zig");
 
 const WIDTH = 128;
 const HEIGHT = 128;
@@ -17,6 +17,8 @@ pub fn main() !void {
     var circle_x: f32 = WIDTH / 2;
     var circle_y: f32 = HEIGHT / 2;
     const speed: f32 = 2.0;
+
+    var app: project.App = .{ .timeline = .{ .track = .{} } };
 
     while (!interface.shouldClose()) {
         // poll events
@@ -50,7 +52,7 @@ pub fn main() !void {
             rl.drawText("128x128", 2, 2, 10, rl.Color.light_gray);
             rl.drawRectangleLines(0, 0, WIDTH, HEIGHT, rl.Color.purple);
 
-            timeline.render();
+            app.timeline.render();
         }
     }
 }
