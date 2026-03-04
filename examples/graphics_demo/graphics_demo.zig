@@ -49,7 +49,7 @@ pub fn main() !void {
             rl.drawText("128x128", 2, 2, 10, rl.Color.light_gray);
             rl.drawRectangleLines(0, 0, WIDTH, HEIGHT, rl.Color.purple);
 
-            app.timeline.render();
+            app.render();
         }
     }
 }

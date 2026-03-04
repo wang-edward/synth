@@ -7,12 +7,7 @@ pub const App = struct {
     timeline: Timeline,
     // screen: Screen,
     pub fn render(self: *App) void {
-        switch (self.screen) {
-            .timeline => self.timeline.render(),
-            .track => self.timeline.track.render(),
-            .plugin_sel => unreachable,
-        }
-
+        self.timeline.render();
         // draw after for overlay
         for (0..interface.WIDTH) |x| {
             for (0..interface.HEIGHT) |y| {
