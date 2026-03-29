@@ -17,6 +17,17 @@ var g_graph_queue: ops.GraphQueue = .{};
 var g_garbage_queue: ops.GarbageQueue = .{};
 var g_active_track: usize = 0;
 
+const Screen = enum { timeline, track, plugin_selector };
+const Mode = enum { normal, insert };
+var g_screen: Screen = .timeline;
+var g_mode: Mode = .normal;
+var g_cursor_beat: f32 = 0;
+var g_viewport_center: f32 = 8;
+var g_viewport_radius: f32 = 8;
+var g_scroll_offset: usize = 0;
+var g_selected_plugin: usize = 0;
+var g_selector_idx: usize = 0;
+
 // Recording state
 var g_held_notes: [128]?midi.Frame = .{null} ** 128; // note -> start frame
 var g_record_buffer: std.ArrayListUnmanaged(midi.Note) = .{};
@@ -352,6 +363,20 @@ fn keyToMidi(key: rl.KeyboardKey) ?u8 {
     };
 }
 
+fn addSelectedPlugin() void {
+    const tag: project.PluginTag = @enumFromInt(g_selector_idx);
+    switch (tag) {
+        .lpf => {
+            const state = A.create(audio.Lpf.State) catch return;
+            state.* = .{};
+            while (!g_graph_queue.push(.{ .AddPlugin = .{
+                .track = g_active_track,
+                .plugin = .{ .lpf = audio.Lpf.init(undefined, 1.0, 2.0, 2000.0, state) },
+            } })) {}
+        },
+    }
+}
+
 pub fn main() !void {
     defer _ = gpa.deinit();
 
@@ -380,89 +405,104 @@ pub fn main() !void {
             p.deinitState(A);
         }
 
-        for (note_keys) |key| {
-            const down = rl.isKeyDown(key);
-            const active_note = key_state.get(key).?;
-
-            if (down and active_note == null) {
-                if (keyToMidi(key)) |base| {
-                    const note: u8 = @intCast(@as(i16, base) + @as(i16, offset));
-                    while (!g_note_queue.push(.{ .On = note })) {} // TODO remove blocking?
-                    try key_state.put(key, note);
-
-                    std.debug.print("key pressed {}\n", .{key});
+        // Toggle mode
+        if (rl.isKeyPressed(.i)) {
+            g_mode = if (g_mode == .insert) .normal else .insert;
+            if (g_mode == .normal) {
+                for (note_keys) |key| {
+                    if (key_state.get(key).?) |note| {
+                        while (!g_note_queue.push(.{ .Off = note })) {}
+                        try key_state.put(key, null);
+                    }
                 }
-            } else if (!down and active_note != null) {
-                while (!g_note_queue.push(.{ .Off = active_note.? })) {} // TODO remove blocking?
-                try key_state.put(key, null);
-
-                std.debug.print("key released {}\n", .{key});
             }
         }
 
-        if (rl.isKeyPressed(.up)) {
-            const curr = getActiveTrack().synth.params.get(.cutoff);
-            std.debug.print("cutoff: {}\n", .{curr});
-            getActiveTrack().synth.params.set(.cutoff, curr * 1.1);
-        }
-        if (rl.isKeyPressed(.down)) {
-            const curr = getActiveTrack().synth.params.get(.cutoff);
-            std.debug.print("cutoff: {}\n", .{curr});
-            getActiveTrack().synth.params.set(.cutoff, curr * 0.9);
-        }
-
-        if (rl.isKeyPressed(.x)) offset += 12;
-        if (rl.isKeyPressed(.z)) offset -= 12;
-
-        if (rl.isKeyPressed(.space)) {
-            while (!g_op_queue.push(.{ .Playback = .TogglePlay })) {}
-        }
-
-        if (rl.isKeyPressed(.backspace)) {
-            while (!g_op_queue.push(.{ .Playback = .Reset })) {}
-        }
-
-        // r: toggle recording on active track
-        if (rl.isKeyPressed(.r)) {
-            while (!g_op_queue.push(.{ .Record = .{ .ToggleRecord = g_active_track } })) {}
-        }
-
-        // - / = : remove / add track
-        if (rl.isKeyPressed(.minus)) {
-            while (!g_graph_queue.push(.{ .RemoveTrack = g_active_track })) {}
-            std.debug.print("removed track {}\n", .{g_active_track});
-        }
-        if (rl.isKeyPressed(.equal)) {
-            while (!g_graph_queue.push(.AddTrack)) {}
-            std.debug.print("added track\n", .{});
-        }
-
-        // [ / ] : switch active track
-        if (rl.isKeyPressed(.left_bracket)) {
-            if (g_active_track > 0) g_active_track -= 1;
-            std.debug.print("current track: {}\n", .{g_active_track});
-        }
-        if (rl.isKeyPressed(.right_bracket)) {
-            if (g_active_track < g_timeline.track_count - 1) g_active_track += 1;
-            std.debug.print("current track: {}\n", .{g_active_track});
-        }
-
-        // 1: toggle LPF
-        if (rl.isKeyPressed(.one)) {
-            if (getActiveTrack().hasPlugin(.lpf)) {
-                while (!g_graph_queue.push(.{ .RemovePlugin = .{ .track = g_active_track, .tag = .lpf } })) {}
-            } else {
-                const state = A.create(audio.Lpf.State) catch continue;
-                state.* = .{};
-                while (!g_graph_queue.push(.{ .AddPlugin = .{ .track = g_active_track, .plugin = .{ .lpf = audio.Lpf.init(undefined, 1.0, 2.0, 2000.0, state) } } })) {}
+        if (g_mode == .insert) {
+            for (note_keys) |key| {
+                const down = rl.isKeyDown(key);
+                const active_note = key_state.get(key).?;
+                if (down and active_note == null) {
+                    if (keyToMidi(key)) |base| {
+                        const note: u8 = @intCast(@as(i16, base) + @as(i16, offset));
+                        while (!g_note_queue.push(.{ .On = note })) {}
+                        try key_state.put(key, note);
+                    }
+                } else if (!down and active_note != null) {
+                    while (!g_note_queue.push(.{ .Off = active_note.? })) {}
+                    try key_state.put(key, null);
+                }
             }
+            if (rl.isKeyPressed(.up)) {
+                const curr = getActiveTrack().synth.params.get(.cutoff);
+                getActiveTrack().synth.params.set(.cutoff, curr * 1.1);
+            }
+            if (rl.isKeyPressed(.down)) {
+                const curr = getActiveTrack().synth.params.get(.cutoff);
+                getActiveTrack().synth.params.set(.cutoff, curr * 0.9);
+            }
+            if (rl.isKeyPressed(.x)) offset += 12;
+            if (rl.isKeyPressed(.z)) offset -= 12;
+        } else switch (g_screen) {
+            .timeline => {
+                if (rl.isKeyPressed(.h)) g_cursor_beat = @max(0, g_cursor_beat - 1);
+                if (rl.isKeyPressed(.l)) g_cursor_beat += 1;
+                if (rl.isKeyPressed(.j) and g_active_track < g_timeline.track_count - 1) g_active_track += 1;
+                if (rl.isKeyPressed(.k) and g_active_track > 0) g_active_track -= 1;
+                if (rl.isKeyPressed(.space)) while (!g_op_queue.push(.{ .Playback = .TogglePlay })) {};
+                if (rl.isKeyPressed(.backspace)) while (!g_op_queue.push(.{ .Playback = .Reset })) {};
+                if (rl.isKeyPressed(.r)) while (!g_op_queue.push(.{ .Record = .{ .ToggleRecord = g_active_track } })) {};
+                if (rl.isKeyPressed(.enter)) g_screen = .track;
+                if (rl.isKeyPressed(.minus)) g_viewport_radius = @min(64, g_viewport_radius * 2);
+                if (rl.isKeyPressed(.equal)) g_viewport_radius = @max(1, g_viewport_radius / 2);
+            },
+            .track => {
+                if (rl.isKeyPressed(.h) and g_selected_plugin > 0) g_selected_plugin -= 1;
+                if (rl.isKeyPressed(.l)) g_selected_plugin = @min(g_selected_plugin + 1, project.Track.MAX_PLUGINS - 1);
+                if (rl.isKeyPressed(.a)) {
+                    g_screen = .plugin_selector;
+                    g_selector_idx = 0;
+                }
+                if (rl.isKeyPressed(.x) and g_selected_plugin < getActiveTrack().plugin_count) {
+                    const tag = std.meta.activeTag(getActiveTrack().plugins[g_selected_plugin]);
+                    while (!g_graph_queue.push(.{ .RemovePlugin = .{ .track = g_active_track, .tag = tag } })) {}
+                }
+                if (rl.isKeyPressed(.escape)) g_screen = .timeline;
+            },
+            .plugin_selector => {
+                const tag_count = @typeInfo(project.PluginTag).@"enum".fields.len;
+                if (rl.isKeyPressed(.j) and g_selector_idx < tag_count - 1) g_selector_idx += 1;
+                if (rl.isKeyPressed(.k) and g_selector_idx > 0) g_selector_idx -= 1;
+                if (rl.isKeyPressed(.enter)) {
+                    addSelectedPlugin();
+                    g_screen = .track;
+                }
+                if (rl.isKeyPressed(.escape)) g_screen = .track;
+            },
         }
 
-        // draw UI
+        // Render
         interface.preRender();
         defer interface.postRender();
-        {
-            g_timeline.render();
+        switch (g_screen) {
+            .timeline => {
+                const playhead_beat: f32 = @as(f32, @floatFromInt(g_playhead)) * 120.0 / (48000.0 * 60.0);
+                g_timeline.render(.{
+                    .playhead_beat = playhead_beat,
+                    .cursor_beat = g_cursor_beat,
+                    .active_track = g_active_track,
+                    .viewport_left = g_viewport_center - g_viewport_radius,
+                    .viewport_width = g_viewport_radius * 2,
+                    .scroll_offset = g_scroll_offset,
+                    .mode_insert = g_mode == .insert,
+                    .sr = 48000,
+                    .bpm = 120,
+                });
+            },
+            .track => getActiveTrack().renderDetail(g_selected_plugin, g_active_track),
+            .plugin_selector => project.renderPluginSelector(g_selector_idx),
         }
+        if (g_mode == .insert) interface.drawBorder(rl.Color.magenta);
+        if (g_recording) interface.drawBorder(rl.Color.red);
     }
 }

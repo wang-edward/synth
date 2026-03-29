@@ -58,6 +58,10 @@ pub fn postRender() void {
     );
 }
 
+pub fn drawBorder(color: rl.Color) void {
+    rl.drawRectangleLines(0, 0, WIDTH, HEIGHT, color);
+}
+
 pub fn shouldClose() bool {
     return rl.windowShouldClose();
 }

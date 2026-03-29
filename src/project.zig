@@ -5,6 +5,35 @@ const audio = @import("audio.zig");
 const interface = @import("interface.zig");
 const rl = @import("raylib");
 
+pub const RenderCtx = struct {
+    playhead_beat: f32,
+    cursor_beat: f32,
+    active_track: usize,
+    viewport_left: f32,
+    viewport_width: f32,
+    scroll_offset: usize,
+    mode_insert: bool,
+    sr: f32,
+    bpm: f32,
+};
+
+fn frameToBeat(frame: midi.Frame, sr: f32, bpm: f32) f32 {
+    return @as(f32, @floatFromInt(frame)) * bpm / (sr * 60.0);
+}
+
+fn beatToPx(beat: f32, vp_left: f32, vp_width: f32) i32 {
+    return @intFromFloat((beat - vp_left) / vp_width * 128.0);
+}
+
+pub fn renderPluginSelector(selected: usize) void {
+    rl.drawText("Add Plugin", 1, 1, 10, rl.Color.white);
+    const fields = @typeInfo(PluginTag).@"enum".fields;
+    inline for (fields, 0..) |field, i| {
+        const y: i32 = 16 + @as(i32, @intCast(i)) * 16;
+        rl.drawText(field.name, 8, y, 10, if (i == selected) rl.Color.green else rl.Color.white);
+    }
+}
+
 pub const Timeline = struct {
     pub const MAX_TRACKS = 8;
 
@@ -59,14 +88,23 @@ pub const Timeline = struct {
         }
     }
 
-    pub fn render(self: *Timeline) void {
-        _ = self;
-        for (0..interface.WIDTH) |x| {
-            for (0..interface.HEIGHT) |y| {
-                if ((x + y) % 2 == 0) {
-                    rl.drawPixel(@intCast(x), @intCast(y), rl.Color.red);
-                }
-            }
+    pub fn render(self: *Timeline, ctx: RenderCtx) void {
+        var buf: [32]u8 = undefined;
+        // Header
+        rl.drawText(if (ctx.mode_insert) "I" else "N", 1, 1, 10, if (ctx.mode_insert) rl.Color.magenta else rl.Color.white);
+        const bt = std.fmt.bufPrintZ(&buf, "{d:.1}", .{ctx.cursor_beat}) catch unreachable;
+        rl.drawText(bt, 40, 1, 10, rl.Color.white);
+        var buf2: [8]u8 = undefined;
+        const tt = std.fmt.bufPrintZ(&buf2, "T{}", .{ctx.active_track}) catch unreachable;
+        rl.drawText(tt, 108, 1, 10, rl.Color.white);
+        rl.drawLine(0, 12, 128, 12, rl.Color.dark_gray);
+        // Track rows
+        const row_h: i32 = 29;
+        for (0..4) |i| {
+            const idx = ctx.scroll_offset + i;
+            if (idx >= self.track_count) break;
+            const y: i32 = 12 + @as(i32, @intCast(i)) * row_h;
+            self.tracks[idx].renderTimeline(y, row_h, ctx, idx);
         }
     }
 };
@@ -199,6 +237,50 @@ pub const Track = struct {
         self.player.clear();
         self.synth.allNotesOff();
         self.plugin_count = 0;
+    }
+
+    pub fn renderTimeline(self: *Track, y: i32, h: i32, ctx: RenderCtx, idx: usize) void {
+        const active = idx == ctx.active_track;
+        var buf: [4]u8 = undefined;
+        const label = std.fmt.bufPrintZ(&buf, "{}", .{idx}) catch unreachable;
+        rl.drawText(label, 1, y + 8, 10, if (active) rl.Color.yellow else rl.Color.gray);
+        if (active) rl.drawRectangleLines(0, y, 128, h, rl.Color.yellow);
+        // Clips
+        for (self.player.notes.items) |note| {
+            const sb = frameToBeat(note.start, ctx.sr, ctx.bpm);
+            const eb = frameToBeat(note.end, ctx.sr, ctx.bpm);
+            const x0 = beatToPx(sb, ctx.viewport_left, ctx.viewport_width);
+            const x1 = beatToPx(eb, ctx.viewport_left, ctx.viewport_width);
+            if (x1 < 10 or x0 >= 128) continue;
+            rl.drawRectangle(@max(x0, 10), y + 2, @max(x1 - @max(x0, 10), 1), h - 4, rl.Color.green);
+        }
+        // Playhead
+        const ph = beatToPx(ctx.playhead_beat, ctx.viewport_left, ctx.viewport_width);
+        if (ph >= 10 and ph < 128) rl.drawLine(ph, y, ph, y + h, rl.Color.white);
+        // Cursor
+        if (active) {
+            const cx = beatToPx(ctx.cursor_beat, ctx.viewport_left, ctx.viewport_width);
+            if (cx >= 10 and cx < 128) rl.drawRectangleLines(cx - 1, y, 3, h, rl.Color.orange);
+        }
+    }
+
+    pub fn renderDetail(self: *Track, selected: usize, track_idx: usize) void {
+        var buf: [16]u8 = undefined;
+        const title = std.fmt.bufPrintZ(&buf, "Track {}", .{track_idx}) catch unreachable;
+        rl.drawText(title, 1, 1, 10, rl.Color.white);
+        for (0..8) |i| {
+            const col: i32 = @intCast(i % 4);
+            const row: i32 = @intCast(i / 4);
+            const x = col * 32;
+            const dy = 16 + row * 48;
+            rl.drawRectangleLines(x, dy, 32, 48, if (i == selected) rl.Color.green else rl.Color.dark_gray);
+            if (i < self.plugin_count) {
+                rl.drawText(@tagName(self.plugins[i]), x + 2, dy + 18, 10, rl.Color.white);
+            } else {
+                rl.drawText("---", x + 8, dy + 18, 10, rl.Color.dark_gray);
+            }
+        }
+        rl.drawText("[esc]back [a]add [x]del", 1, 116, 8, rl.Color.gray);
     }
 
     fn rewire(self: *Track) void {
